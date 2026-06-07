@@ -2,6 +2,7 @@ pub mod bios;
 pub mod bus;
 pub mod cartridge;
 pub mod cpu;
+pub mod edu;
 pub mod gba;
 pub mod ppu;
 

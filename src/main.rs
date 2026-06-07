@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use minifb::{Key, Scale, Window, WindowOptions};
 use vibe_gba::cartridge::load_rom_file;
+use vibe_gba::edu::EduTracker;
 use vibe_gba::gba::{Button, Gba};
 use vibe_gba::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
@@ -15,6 +16,7 @@ struct Args {
     frames: Option<u64>,
     turbo: bool,
     trace: bool,
+    edu_mode: bool,
     dump_state: bool,
     stop_pc: Option<u32>,
     stop_invalid: bool,
@@ -77,15 +79,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Some(frames) = args.frames {
+        let mut edu_tracker = args.edu_mode.then(EduTracker::emerald_onboarding);
         for frame in 0..frames {
             apply_headless_input(&mut gba, &args, frame);
             gba.run_frame();
+            if let Some(tracker) = edu_tracker.as_mut() {
+                let completed = tracker.update_from_summary(&gba.debug_summary(), frame + 1);
+                for objective in completed {
+                    println!(
+                        "EDU completed: {} frame={} title=\"{}\" prompt=\"{}\"",
+                        objective.id,
+                        objective.completed_at.unwrap_or(frame + 1),
+                        objective.title,
+                        objective.prompt
+                    );
+                }
+            }
         }
         if let Some(path) = args.screenshot.as_deref() {
             write_png(path, gba.framebuffer())?;
         }
         if args.dump_state {
             println!("{}", gba.debug_summary());
+        }
+        if let Some(tracker) = edu_tracker.as_ref() {
+            tracker.print_summary();
         }
         save_state_if_requested(&gba, &args)?;
         gba.flush_save()?;
@@ -134,6 +152,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
     let mut frames = None;
     let mut turbo = false;
     let mut trace = false;
+    let mut edu_mode = false;
     let mut dump_state = false;
     let mut stop_pc = None;
     let mut stop_invalid = false;
@@ -161,6 +180,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
             }
             "--turbo" => turbo = true,
             "--trace" => trace = true,
+            "--edu-mode" => edu_mode = true,
             "--dump-state" => dump_state = true,
             "--hold-a" => hold_a = true,
             "--hold-start" => hold_start = true,
@@ -210,6 +230,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
         frames,
         turbo,
         trace,
+        edu_mode,
         dump_state,
         stop_pc,
         stop_invalid,
@@ -223,7 +244,7 @@ fn parse_args() -> Result<Args, Box<dyn std::error::Error>> {
 
 fn print_help() {
     eprintln!(
-        "usage: vibe-gba <rom.gba|zip> [--save file.sav] [--frames N] [--screenshot out.png] [--save-state state.bin] [--load-state state.bin] [--dump-state] [--hold-a] [--hold-start] [--input-script frame:duration:buttons,...] [--stop-pc HEX] [--stop-hit N] [--stop-invalid] [--max-steps N] [--turbo] [--trace]"
+        "usage: vibe-gba <rom.gba|zip> [--save file.sav] [--frames N] [--screenshot out.png] [--save-state state.bin] [--load-state state.bin] [--dump-state] [--edu-mode] [--hold-a] [--hold-start] [--input-script frame:duration:buttons,...] [--stop-pc HEX] [--stop-hit N] [--stop-invalid] [--max-steps N] [--turbo] [--trace]"
     );
 }
 
