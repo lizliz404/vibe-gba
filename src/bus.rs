@@ -225,6 +225,7 @@ impl Bus {
                 write_io_raw16(&mut self.io, 0x200, ie);
             }
             self.process_emerald_dma3_requests();
+            self.mirror_emerald_window_tiles();
             self.run_dma_timing(1);
         }
         if events.frame {
@@ -692,6 +693,46 @@ impl Bus {
             self.write16(base + 8, 0);
             self.write16(base + 10, 0);
             self.write32(base + 12, 0);
+        }
+    }
+
+    fn mirror_emerald_window_tiles(&mut self) {
+        const G_WINDOWS: u32 = 0x0202_0004;
+        const WINDOW_SIZE: u32 = 12;
+
+        for window_id in 0..32 {
+            let base = G_WINDOWS + window_id * WINDOW_SIZE;
+            let bg = self.read8(base);
+            if bg > 3 {
+                continue;
+            }
+
+            let width = self.read8(base + 3) as u32;
+            let height = self.read8(base + 4) as u32;
+            if width == 0 || height == 0 || width > 32 || height > 32 {
+                continue;
+            }
+
+            let base_block = self.read16(base + 6) as u32;
+            let tile_data = self.read32(base + 8);
+            if !(0x0200_0000..0x0204_0000).contains(&tile_data) {
+                continue;
+            }
+
+            let bgcnt = self.read_io16(0x008 + bg as usize * 2);
+            let char_base = (((bgcnt >> 2) & 3) as u32) * 0x4000;
+            let dest = 0x0600_0000 + char_base + base_block * 32;
+            let size = (width * height * 32).min(0x4000);
+            if dest + size > 0x0601_8000 {
+                continue;
+            }
+            if (0..size).all(|off| self.read8(tile_data + off) == 0) {
+                continue;
+            }
+
+            for off in 0..size {
+                self.write8_raw(dest + off, self.read8(tile_data + off));
+            }
         }
     }
 }

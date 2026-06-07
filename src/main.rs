@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use minifb::{Key, Scale, Window, WindowOptions};
 use vibe_gba::cartridge::load_rom_file;
 use vibe_gba::gba::{Button, Gba};
 use vibe_gba::{SCREEN_HEIGHT, SCREEN_WIDTH};
-use minifb::{Key, Scale, Window, WindowOptions};
 
 struct Args {
     rom: PathBuf,

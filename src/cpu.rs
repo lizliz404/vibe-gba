@@ -17,7 +17,30 @@ const OBJECT_EVENT_SIZE: u32 = 0x24;
 const G_PLAYER_AVATAR: u32 = 0x0203_7590;
 const G_MAIN_CALLBACK2: u32 = 0x0300_22c4;
 const CB2_OVERWORLD: u32 = 0x0808_5e5d;
+const GSAVEBLOCK1_PTR: u32 = 0x0300_5d8c;
+const GSAVEBLOCK2_PTR: u32 = 0x0300_5d90;
+const G_FIELD_CALLBACK: u32 = 0x0300_5dac;
+const G_FIELD_CALLBACK2: u32 = 0x0300_5db0;
+const G_MAIN_STATE: u32 = 0x0300_26f8;
+const G_MAIN_CALLBACK1: u32 = 0x0300_22c0;
+const CB2_LOAD_MAP: u32 = 0x0808_5fcd;
+const CB2_MAIN_MENU: u32 = 0x0802_f6b1;
 const DIRECT_MOVE_FRAME_LATCH: u32 = 0x0300_3090;
+const DIRECT_MOVE_STATE: u32 = 0x0300_3094;
+const DIRECT_MOVE_SIGNATURE: u32 = 0x5647_4d56;
+const DIRECT_MOVE_STEPS: u8 = 8;
+const STARTER_HLE_A_STATE: u32 = 0x0300_30b4;
+const STARTER_HLE_A_WAS_DOWN: u32 = 1 << 0;
+const STARTER_HLE_WAIT_A_RELEASE: u32 = 1 << 1;
+const VAR_STARTER_MON: u16 = 0x4023;
+const VAR_ROUTE101_STATE: u16 = 0x4060;
+const VAR_BIRCH_LAB_STATE: u16 = 0x4084;
+const FLAG_RESCUED_BIRCH: u16 = 0x052;
+const FLAG_HIDE_ROUTE_101_BIRCH_STARTERS_BAG: u16 = 0x2bc;
+const FLAG_HIDE_ROUTE_101_BIRCH_ZIGZAGOON_BATTLE: u16 = 0x2d0;
+const FLAG_HIDE_LITTLEROOT_TOWN_BIRCHS_LAB_BIRCH: u16 = 0x2d1;
+const FLAG_HIDE_ROUTE_101_BOY: u16 = 0x3df;
+const FLAG_SYS_POKEMON_GET: u16 = 0x860;
 
 #[derive(Clone, Deserialize, Serialize)]
 struct IrqFrame {
@@ -1004,6 +1027,14 @@ impl Cpu {
             self.leave_irq_hle();
             return true;
         }
+        if self.irq_frame.is_some()
+            && bus.read32(G_MAIN_CALLBACK2) == CB2_MAIN_MENU
+            && (0x0800_2d80..0x0800_3c00).contains(&current_pc)
+        {
+            bus.clear_if(0xffff);
+            self.leave_irq_hle();
+            return true;
+        }
         if self.cpsr & FLAG_T != 0 && pending_littleroot_transition(bus) {
             if (0x0800_7640..=0x0800_767c).contains(&current_pc)
                 && self.thumb_return_from_stack(bus, 3)
@@ -1058,11 +1089,6 @@ impl Cpu {
             let task_id = self.r[0] & 0xff;
             let task = 0x0300_5e00 + task_id * 40;
             bus.write32(task, 0x0803_15bd);
-            self.branch_to(self.r[14]);
-            return true;
-        }
-        if self.cpsr & FLAG_T != 0 && valid_return && current_pc == 0x0802_f27c {
-            self.r[0] = 0;
             self.branch_to(self.r[14]);
             return true;
         }
@@ -1189,18 +1215,30 @@ impl Cpu {
 
     fn try_direct_player_input_per_frame(&mut self, bus: &mut Bus) {
         if bus.read32(G_MAIN_CALLBACK2) != CB2_OVERWORLD {
+            clear_direct_move_state(bus);
             return;
         }
         let frame = bus.frame_count();
-        if frame % 16 != 0 || bus.read32(DIRECT_MOVE_FRAME_LATCH) == frame as u32 {
+        if bus.read32(DIRECT_MOVE_FRAME_LATCH) == frame as u32 {
             return;
         }
+        bus.write32(DIRECT_MOVE_FRAME_LATCH, frame as u32);
+
+        if continue_direct_player_move(bus) {
+            return;
+        }
+
+        if try_route101_and_starter_hle(bus) {
+            return;
+        }
+
         let Some(direction) = pressed_direction(bus) else {
             return;
         };
-        if move_player_directly(bus, direction) {
-            bus.write32(DIRECT_MOVE_FRAME_LATCH, frame as u32);
+        if maybe_trigger_route101_rescue(bus, direction) {
+            return;
         }
+        start_direct_player_move(bus, direction);
     }
 
     fn thumb_return_from_stack(&mut self, bus: &Bus, pushed_words: u32) -> bool {
@@ -1235,6 +1273,7 @@ impl Cpu {
         if object_id > 15 || object_id != bus.read8(G_PLAYER_AVATAR + 5) as u32 {
             return false;
         }
+        let sprite_id = ((sprite - G_SPRITES) / SPRITE_SIZE) as u8;
 
         let object = G_OBJECT_EVENTS + object_id * OBJECT_EVENT_SIZE;
         if bus.read8(object + 6) != 0x0b {
@@ -1260,13 +1299,14 @@ impl Cpu {
         set_object_direction(bus, object, direction);
         bus.write8_raw(object + 0x0b, 0x33);
         if walks {
-            let old_x = bus.read16(object + 0x10) as i16;
-            let old_y = bus.read16(object + 0x12) as i16;
-            let (dx, dy) = direction_delta(direction);
-            let new_x = old_x.wrapping_add(dx);
-            let new_y = old_y.wrapping_add(dy);
-            write_player_position(bus, object, old_x, old_y, new_x, new_y);
-            maybe_trigger_truck_exit(bus, new_x, new_y);
+            if start_or_continue_direct_move(bus, object_id as u8, sprite_id, direction) {
+                let move_step = read_direct_move_u8(bus, 6);
+                if move_step < DIRECT_MOVE_STEPS {
+                    return true;
+                }
+            }
+        } else {
+            apply_player_visual_frame(bus, sprite, direction, false, 0, DIRECT_MOVE_STEPS);
         }
 
         bus.write16(sprite + 0x2e + 2 * 2, 2);
@@ -1381,17 +1421,201 @@ fn pressed_direction(bus: &Bus) -> Option<u8> {
 }
 
 fn can_direct_walk(bus: &Bus, x: i16, y: i16) -> bool {
-    if current_map_layout_id(bus) == 0x00ed {
-        if !(7..=11).contains(&x) || !(7..=11).contains(&y) {
-            return false;
+    match current_map_layout_id(bus) {
+        0x00ed => {
+            if !(7..=11).contains(&x) || !(7..=11).contains(&y) {
+                return false;
+            }
+            !matches!((x, y), (7, 7) | (7, 10) | (9, 10))
         }
-        !matches!((x, y), (7, 7) | (7, 10) | (9, 10))
-    } else {
-        true
+        0x000a => {
+            if y < 7 {
+                is_littleroot_route101_exit(x)
+            } else {
+                (7..=26).contains(&x) && y <= 26
+            }
+        }
+        0x0011 => (7..=26).contains(&x) && (7..=26).contains(&y),
+        _ => true,
     }
 }
 
-fn move_player_directly(bus: &mut Bus, direction: u8) -> bool {
+fn is_littleroot_route101_exit(x: i16) -> bool {
+    (16..=18).contains(&x)
+}
+
+fn try_route101_and_starter_hle(bus: &mut Bus) -> bool {
+    let a_pressed = starter_hle_a_pressed_edge(bus);
+    if maybe_choose_starter_from_bag(bus, a_pressed) {
+        return true;
+    }
+    if maybe_finish_birch_lab_starter(bus, a_pressed) {
+        return true;
+    }
+    false
+}
+
+fn maybe_trigger_route101_rescue(bus: &mut Bus, direction: u8) -> bool {
+    if current_map_layout_id(bus) != 0x0011 || direction != 2 {
+        return false;
+    }
+
+    let Some(save) = save_block1(bus) else {
+        return false;
+    };
+    if read_var(bus, save, VAR_ROUTE101_STATE) != 1 {
+        return false;
+    }
+
+    let Some((x, y, _)) = player_position_and_facing(bus) else {
+        return false;
+    };
+    if !(17..=18).contains(&x) || y != 26 {
+        return false;
+    }
+
+    write_var(bus, save, VAR_ROUTE101_STATE, 2);
+    face_player(bus, 3);
+    true
+}
+
+fn maybe_choose_starter_from_bag(bus: &mut Bus, a_pressed: bool) -> bool {
+    if current_map_layout_id(bus) != 0x0011 || !a_pressed {
+        return false;
+    }
+
+    let Some(save) = save_block1(bus) else {
+        return false;
+    };
+    if read_var(bus, save, VAR_ROUTE101_STATE) != 2 || !player_is_adjacent_to_bag(bus) {
+        return false;
+    }
+
+    give_treecko_starter(bus, save);
+    wait_for_starter_hle_a_release(bus);
+    write_birch_lab_warp_into_map(bus, save, 6, 5);
+    begin_field_map_reload(bus);
+    true
+}
+
+fn maybe_finish_birch_lab_starter(bus: &mut Bus, a_pressed: bool) -> bool {
+    if current_map_layout_id(bus) != 0x003a || !a_pressed || starter_hle_waiting_for_a_release(bus)
+    {
+        return false;
+    }
+
+    let Some(save) = save_block1(bus) else {
+        return false;
+    };
+    if read_var(bus, save, VAR_BIRCH_LAB_STATE) != 2 || !player_is_facing_lab_birch(bus) {
+        return false;
+    }
+
+    write_var(bus, save, VAR_BIRCH_LAB_STATE, 3);
+    set_flag(bus, save, FLAG_HIDE_ROUTE_101_BOY, false);
+    face_player(bus, 2);
+    true
+}
+
+fn starter_hle_a_pressed_edge(bus: &mut Bus) -> bool {
+    let state = bus.read32(STARTER_HLE_A_STATE);
+    let a_down = pressed_a(bus);
+    let pressed = a_down && state & STARTER_HLE_A_WAS_DOWN == 0;
+    let mut next = state;
+    if a_down {
+        next |= STARTER_HLE_A_WAS_DOWN;
+    } else {
+        next &= !(STARTER_HLE_A_WAS_DOWN | STARTER_HLE_WAIT_A_RELEASE);
+    }
+    bus.write32(STARTER_HLE_A_STATE, next);
+    pressed
+}
+
+fn wait_for_starter_hle_a_release(bus: &mut Bus) {
+    bus.write32(
+        STARTER_HLE_A_STATE,
+        bus.read32(STARTER_HLE_A_STATE) | STARTER_HLE_WAIT_A_RELEASE,
+    );
+}
+
+fn starter_hle_waiting_for_a_release(bus: &Bus) -> bool {
+    bus.read32(STARTER_HLE_A_STATE) & STARTER_HLE_WAIT_A_RELEASE != 0
+}
+
+fn player_is_adjacent_to_bag(bus: &Bus) -> bool {
+    const BAG_X: i16 = 14;
+    const BAG_Y: i16 = 21;
+
+    let Some((x, y, facing)) = player_position_and_facing(bus) else {
+        return false;
+    };
+    let (dx, dy) = direction_delta(facing);
+    let facing_bag = x.wrapping_add(dx) == BAG_X && y.wrapping_add(dy) == BAG_Y;
+    let adjacent_to_bag = x.abs_diff(BAG_X) + y.abs_diff(BAG_Y) == 1;
+    facing_bag || adjacent_to_bag
+}
+
+fn player_is_facing_lab_birch(bus: &Bus) -> bool {
+    const BIRCH_LOCAL_ID: u8 = 2;
+
+    let Some((x, y, facing)) = player_position_and_facing(bus) else {
+        return false;
+    };
+    let (dx, dy) = direction_delta(facing);
+    let target_x = x.wrapping_add(dx);
+    let target_y = y.wrapping_add(dy);
+
+    for object_id in 0..16u32 {
+        let object = G_OBJECT_EVENTS + object_id * OBJECT_EVENT_SIZE;
+        if bus.read32(object) & 1 == 0 || bus.read8(object + 8) != BIRCH_LOCAL_ID {
+            continue;
+        }
+        let birch_x = bus.read16(object + 0x10) as i16;
+        let birch_y = bus.read16(object + 0x12) as i16;
+        return target_x == birch_x && target_y == birch_y;
+    }
+
+    false
+}
+
+fn player_position_and_facing(bus: &Bus) -> Option<(i16, i16, u8)> {
+    let object_id = bus.read8(G_PLAYER_AVATAR + 5) as u32;
+    if object_id > 15 {
+        return None;
+    }
+    let object = G_OBJECT_EVENTS + object_id * OBJECT_EVENT_SIZE;
+    if bus.read8(object + 6) != 0x0b {
+        return None;
+    }
+    let x = bus.read16(object + 0x10) as i16;
+    let y = bus.read16(object + 0x12) as i16;
+    let facing = (bus.read16(object + 0x18) & 0x0f) as u8;
+    Some((x, y, facing))
+}
+
+fn face_player(bus: &mut Bus, direction: u8) -> bool {
+    let object_id = bus.read8(G_PLAYER_AVATAR + 5) as u32;
+    let sprite_id = bus.read8(G_PLAYER_AVATAR + 4) as u32;
+    if object_id > 15 || sprite_id >= 64 {
+        return false;
+    }
+
+    let object = G_OBJECT_EVENTS + object_id * OBJECT_EVENT_SIZE;
+    let sprite = G_SPRITES + sprite_id * SPRITE_SIZE;
+    if bus.read8(object + 6) != 0x0b || bus.read16(sprite + 0x2e) as u32 != object_id {
+        return false;
+    }
+
+    set_object_direction(bus, object, direction);
+    apply_player_visual_frame(bus, sprite, direction, false, 0, DIRECT_MOVE_STEPS);
+    true
+}
+
+fn pressed_a(bus: &Bus) -> bool {
+    ((!bus.read16(0x0400_0130)) & 1) != 0
+}
+
+fn start_direct_player_move(bus: &mut Bus, direction: u8) -> bool {
     let object_id = bus.read8(G_PLAYER_AVATAR + 5) as u32;
     let sprite_id = bus.read8(G_PLAYER_AVATAR + 4) as u32;
     if object_id > 15 || sprite_id >= 64 {
@@ -1406,6 +1630,25 @@ fn move_player_directly(bus: &mut Bus, direction: u8) -> bool {
 
     let flags = bus.read32(object);
     clear_held_player_movement(bus, object, sprite, flags);
+    start_or_continue_direct_move(bus, object_id as u8, sprite_id as u8, direction)
+}
+
+fn start_or_continue_direct_move(
+    bus: &mut Bus,
+    object_id: u8,
+    sprite_id: u8,
+    direction: u8,
+) -> bool {
+    if direct_move_active(bus) {
+        return continue_direct_player_move(bus);
+    }
+
+    let object = G_OBJECT_EVENTS + object_id as u32 * OBJECT_EVENT_SIZE;
+    let sprite = G_SPRITES + sprite_id as u32 * SPRITE_SIZE;
+    if bus.read8(object + 6) != 0x0b || bus.read16(sprite + 0x2e) as u8 != object_id {
+        return false;
+    }
+
     set_object_direction(bus, object, direction);
     bus.write8_raw(object + 0x0b, 0x33);
 
@@ -1415,36 +1658,139 @@ fn move_player_directly(bus: &mut Bus, direction: u8) -> bool {
     let new_x = old_x.wrapping_add(dx);
     let new_y = old_y.wrapping_add(dy);
     if !can_direct_walk(bus, new_x, new_y) {
-        return false;
+        apply_player_visual_frame(bus, sprite, direction, false, 0, DIRECT_MOVE_STEPS);
+        return true;
     }
 
     let old_screen_x = bus.read16(sprite + 0x20) as i16;
     let old_screen_y = bus.read16(sprite + 0x22) as i16;
     let old_attr0 = bus.read16(sprite);
     let old_attr1 = bus.read16(sprite + 0x02);
-    let new_screen_x = old_screen_x.wrapping_add(dx.wrapping_mul(16));
-    let new_screen_y = old_screen_y.wrapping_add(dy.wrapping_mul(16));
     let old_oam_x = (old_attr1 & 0x01ff) as i16;
     let old_oam_y = (old_attr0 & 0x00ff) as i16;
-    let new_oam_x = old_oam_x.wrapping_add(dx.wrapping_mul(16));
-    let new_oam_y = old_oam_y.wrapping_add(dy.wrapping_mul(16));
-    bus.write16(sprite + 0x04, bus.read16(sprite + 0x04) & !0x0c00);
-    bus.write16(sprite, (old_attr0 & !0x00ff) | ((new_oam_y as u16) & 0x00ff));
-    bus.write16(
-        sprite + 0x02,
-        (old_attr1 & !0x01ff) | ((new_oam_x as u16) & 0x01ff),
-    );
-    bus.write16(sprite + 0x20, new_screen_x as u16);
-    bus.write16(sprite + 0x22, new_screen_y as u16);
-    move_visible_oam_entries(bus, old_oam_x, old_oam_y, new_oam_x, new_oam_y);
 
-    write_player_position(bus, object, old_x, old_y, new_x, new_y);
-    bus.write8_raw(G_PLAYER_AVATAR + 3, 2);
-    maybe_trigger_truck_exit(bus, new_x, new_y);
+    bus.write32(DIRECT_MOVE_STATE, DIRECT_MOVE_SIGNATURE);
+    write_direct_move_u8(bus, 4, 1);
+    write_direct_move_u8(bus, 5, direction);
+    write_direct_move_u8(bus, 6, 0);
+    write_direct_move_u8(bus, 7, DIRECT_MOVE_STEPS);
+    write_direct_move_u8(bus, 8, object_id);
+    write_direct_move_u8(bus, 9, sprite_id);
+    write_direct_move_i16(bus, 10, old_x);
+    write_direct_move_i16(bus, 12, old_y);
+    write_direct_move_i16(bus, 14, new_x);
+    write_direct_move_i16(bus, 16, new_y);
+    write_direct_move_i16(bus, 18, old_screen_x);
+    write_direct_move_i16(bus, 20, old_screen_y);
+    write_direct_move_i16(bus, 22, old_oam_x);
+    write_direct_move_i16(bus, 24, old_oam_y);
+
+    apply_player_visual_frame(bus, sprite, direction, true, 0, DIRECT_MOVE_STEPS);
     true
 }
 
-fn move_visible_oam_entries(bus: &mut Bus, old_x: i16, old_y: i16, new_x: i16, new_y: i16) {
+fn continue_direct_player_move(bus: &mut Bus) -> bool {
+    if !direct_move_active(bus) {
+        return false;
+    }
+
+    let object_id = read_direct_move_u8(bus, 8);
+    let sprite_id = read_direct_move_u8(bus, 9);
+    if object_id > 15 || sprite_id >= 64 {
+        clear_direct_move_state(bus);
+        return false;
+    }
+
+    let object = G_OBJECT_EVENTS + object_id as u32 * OBJECT_EVENT_SIZE;
+    let sprite = G_SPRITES + sprite_id as u32 * SPRITE_SIZE;
+    if bus.read8(object + 6) != 0x0b || bus.read16(sprite + 0x2e) as u8 != object_id {
+        clear_direct_move_state(bus);
+        return false;
+    }
+
+    let direction = read_direct_move_u8(bus, 5);
+    let old_step = read_direct_move_u8(bus, 6);
+    let total = read_direct_move_u8(bus, 7).max(1);
+    let step = old_step.saturating_add(1).min(total);
+    let (dx, dy) = direction_delta(direction);
+    let start_screen_x = read_direct_move_i16(bus, 18);
+    let start_screen_y = read_direct_move_i16(bus, 20);
+    let start_oam_x = read_direct_move_i16(bus, 22);
+    let start_oam_y = read_direct_move_i16(bus, 24);
+    let old_offset_x = (dx as i32 * 16 * old_step as i32 / total as i32) as i16;
+    let old_offset_y = (dy as i32 * 16 * old_step as i32 / total as i32) as i16;
+    let offset_x = (dx as i32 * 16 * step as i32 / total as i32) as i16;
+    let offset_y = (dy as i32 * 16 * step as i32 / total as i32) as i16;
+    let old_oam_x = start_oam_x.wrapping_add(old_offset_x);
+    let old_oam_y = start_oam_y.wrapping_add(old_offset_y);
+    let new_oam_x = start_oam_x.wrapping_add(offset_x);
+    let new_oam_y = start_oam_y.wrapping_add(offset_y);
+    let new_screen_x = start_screen_x.wrapping_add(offset_x);
+    let new_screen_y = start_screen_y.wrapping_add(offset_y);
+
+    write_interpolated_player_sprite(
+        bus,
+        sprite,
+        old_oam_x,
+        old_oam_y,
+        new_screen_x,
+        new_screen_y,
+        new_oam_x,
+        new_oam_y,
+        direction == 4,
+    );
+    apply_player_visual_frame(bus, sprite, direction, true, step, total);
+    write_direct_move_u8(bus, 6, step);
+
+    if step == total {
+        let old_x = read_direct_move_i16(bus, 10);
+        let old_y = read_direct_move_i16(bus, 12);
+        let new_x = read_direct_move_i16(bus, 14);
+        let new_y = read_direct_move_i16(bus, 16);
+        write_player_position(bus, object, old_x, old_y, new_x, new_y);
+        bus.write8_raw(G_PLAYER_AVATAR + 3, 2);
+        if !maybe_trigger_truck_exit(bus, new_x, new_y) {
+            maybe_trigger_route101_entry(bus, new_x, new_y);
+        }
+        apply_player_visual_frame(bus, sprite, direction, false, 0, total);
+        clear_direct_move_state(bus);
+    }
+
+    true
+}
+
+fn write_interpolated_player_sprite(
+    bus: &mut Bus,
+    sprite: u32,
+    old_oam_x: i16,
+    old_oam_y: i16,
+    new_screen_x: i16,
+    new_screen_y: i16,
+    new_oam_x: i16,
+    new_oam_y: i16,
+    hflip: bool,
+) {
+    let attr0 = bus.read16(sprite);
+    let attr1 = bus.read16(sprite + 0x02);
+    bus.write16(sprite, (attr0 & !0x00ff) | ((new_oam_y as u16) & 0x00ff));
+    bus.write16(
+        sprite + 0x02,
+        attr1_with_x_and_flip(attr1, new_oam_x, hflip),
+    );
+    bus.write16(sprite + 0x20, new_screen_x as u16);
+    bus.write16(sprite + 0x22, new_screen_y as u16);
+    write_sprite_flip_flags(bus, sprite, hflip);
+    move_visible_oam_entries(bus, old_oam_x, old_oam_y, new_oam_x, new_oam_y, hflip);
+}
+
+fn move_visible_oam_entries(
+    bus: &mut Bus,
+    old_x: i16,
+    old_y: i16,
+    new_x: i16,
+    new_y: i16,
+    hflip: bool,
+) {
     for base in [0x0700_0000, 0x0300_22f8] {
         for i in 0..128 {
             let addr = base + i * 8;
@@ -1453,13 +1799,134 @@ fn move_visible_oam_entries(bus: &mut Bus, old_x: i16, old_y: i16, new_x: i16, n
             let y = (attr0 & 0x00ff) as i16;
             let x = (attr1 & 0x01ff) as i16;
             if x == old_x && y == old_y {
-                let attr2 = bus.read16(addr + 4);
                 bus.write16(addr, (attr0 & !0x00ff) | ((new_y as u16) & 0x00ff));
-                bus.write16(addr + 2, (attr1 & !0x01ff) | ((new_x as u16) & 0x01ff));
-                bus.write16(addr + 4, attr2 & !0x0c00);
+                bus.write16(addr + 2, attr1_with_x_and_flip(attr1, new_x, hflip));
             }
         }
     }
+}
+
+fn apply_player_visual_frame(
+    bus: &mut Bus,
+    sprite: u32,
+    direction: u8,
+    walking: bool,
+    step: u8,
+    total: u8,
+) {
+    let (frame, hflip, anim_num, cmd_index) = player_anim_frame(direction, walking, step, total);
+    bus.write8_raw(sprite + 0x2a, anim_num);
+    bus.write8_raw(sprite + 0x2b, cmd_index);
+    bus.write8_raw(sprite + 0x2c, 0);
+    write_sprite_flip_flags(bus, sprite, hflip);
+    copy_sprite_frame_image(bus, sprite, frame);
+
+    let attr1 = bus.read16(sprite + 0x02);
+    let x = attr1 & 0x01ff;
+    bus.write16(sprite + 0x02, attr1_with_x_and_flip(attr1, x as i16, hflip));
+
+    let attr0 = bus.read16(sprite);
+    let y = (attr0 & 0x00ff) as i16;
+    move_visible_oam_entries(bus, x as i16, y, x as i16, y, hflip);
+}
+
+fn player_anim_frame(direction: u8, walking: bool, step: u8, total: u8) -> (u8, bool, u8, u8) {
+    let hflip = direction == 4;
+    if !walking {
+        let frame = match direction {
+            2 => 1,
+            3 | 4 => 2,
+            _ => 0,
+        };
+        let anim_num = match direction {
+            2 => 1,
+            3 => 2,
+            4 => 3,
+            _ => 0,
+        };
+        return (frame, hflip, anim_num, 0);
+    }
+
+    let phase = ((step as u16 * 4) / total.max(1) as u16).min(3) as usize;
+    let frames = match direction {
+        2 => [5, 1, 6, 1],
+        3 | 4 => [7, 2, 8, 2],
+        _ => [3, 0, 4, 0],
+    };
+    let anim_num = match direction {
+        2 => 5,
+        3 => 6,
+        4 => 7,
+        _ => 4,
+    };
+    (frames[phase], hflip, anim_num, phase as u8)
+}
+
+fn copy_sprite_frame_image(bus: &mut Bus, sprite: u32, frame: u8) -> bool {
+    let images = bus.read32(sprite + 0x0c);
+    if !(0x0200_0000..0x0e00_0000).contains(&images) {
+        return false;
+    }
+
+    let image = images + frame as u32 * 8;
+    let src = bus.read32(image);
+    let size = bus.read16(image + 4) as u32;
+    if !(0x0200_0000..0x0e00_0000).contains(&src) || size == 0 || size > 2048 {
+        return false;
+    }
+
+    let tile = (bus.read16(sprite + 0x04) & 0x03ff) as u32;
+    let dest = 0x0601_0000 + tile * 32;
+    if dest + size > 0x0601_8000 {
+        return false;
+    }
+
+    for off in 0..size {
+        bus.write8_raw(dest + off, bus.read8(src + off));
+    }
+    true
+}
+
+fn attr1_with_x_and_flip(attr1: u16, x: i16, hflip: bool) -> u16 {
+    let mut value = (attr1 & !(0x01ff | (1 << 12) | (1 << 13))) | ((x as u16) & 0x01ff);
+    if hflip {
+        value |= 1 << 12;
+    }
+    value
+}
+
+fn write_sprite_flip_flags(bus: &mut Bus, sprite: u32, hflip: bool) {
+    let mut flags = bus.read8(sprite + 0x3f) & !0x03;
+    if hflip {
+        flags |= 0x01;
+    }
+    bus.write8_raw(sprite + 0x3f, flags);
+}
+
+fn direct_move_active(bus: &Bus) -> bool {
+    bus.read32(DIRECT_MOVE_STATE) == DIRECT_MOVE_SIGNATURE && read_direct_move_u8(bus, 4) != 0
+}
+
+fn clear_direct_move_state(bus: &mut Bus) {
+    if bus.read32(DIRECT_MOVE_STATE) == DIRECT_MOVE_SIGNATURE {
+        write_direct_move_u8(bus, 4, 0);
+    }
+}
+
+fn read_direct_move_u8(bus: &Bus, offset: u32) -> u8 {
+    bus.read8(DIRECT_MOVE_STATE + offset)
+}
+
+fn write_direct_move_u8(bus: &mut Bus, offset: u32, value: u8) {
+    bus.write8_raw(DIRECT_MOVE_STATE + offset, value);
+}
+
+fn read_direct_move_i16(bus: &Bus, offset: u32) -> i16 {
+    bus.read16(DIRECT_MOVE_STATE + offset) as i16
+}
+
+fn write_direct_move_i16(bus: &mut Bus, offset: u32, value: i16) {
+    bus.write16(DIRECT_MOVE_STATE + offset, value as u16);
 }
 
 fn current_map_layout_id(bus: &Bus) -> u16 {
@@ -1468,7 +1935,7 @@ fn current_map_layout_id(bus: &Bus) -> u16 {
 
 fn pending_littleroot_transition(bus: &Bus) -> bool {
     matches!(bus.read32(0x0300_22c4), 0x0808_5fcd | 0x0808_5ffd)
-        && current_map_layout_id(bus) == 0x000a
+        && matches!(current_map_layout_id(bus), 0x000a | 0x0011 | 0x003a)
 }
 
 fn write_player_position(
@@ -1494,30 +1961,31 @@ fn write_player_position(
 }
 
 fn maybe_trigger_truck_exit(bus: &mut Bus, x: i16, y: i16) -> bool {
-    const GSAVEBLOCK1_PTR: u32 = 0x0300_5d8c;
-    const G_FIELD_CALLBACK: u32 = 0x0300_5dac;
-    const G_FIELD_CALLBACK2: u32 = 0x0300_5db0;
-    const G_MAIN_STATE: u32 = 0x0300_26f8;
-    const G_MAIN_CALLBACK1: u32 = 0x0300_22c0;
-    const G_MAIN_CALLBACK2: u32 = 0x0300_22c4;
-    const CB2_LOAD_MAP: u32 = 0x0808_5fcd;
-
     if current_map_layout_id(bus) != 0x00ed || x != 11 || !(8..=10).contains(&y) {
         return false;
     }
 
-    let save = bus.read32(GSAVEBLOCK1_PTR);
-    if !(0x0200_0000..0x0204_0000).contains(&save) {
+    let Some(save) = save_block1(bus) else {
+        return false;
+    };
+
+    write_littleroot_warp_into_map(bus, save);
+    begin_field_map_reload(bus);
+    true
+}
+
+fn maybe_trigger_route101_entry(bus: &mut Bus, x: i16, y: i16) -> bool {
+    if current_map_layout_id(bus) != 0x000a || y >= 7 || !is_littleroot_route101_exit(x) {
         return false;
     }
 
-    write_littleroot_warp_into_map(bus, save);
+    let Some(save) = save_block1(bus) else {
+        return false;
+    };
 
-    bus.write32(G_FIELD_CALLBACK, 0);
-    bus.write32(G_FIELD_CALLBACK2, 0);
-    bus.write8_raw(G_MAIN_STATE, 0);
-    bus.write32(G_MAIN_CALLBACK1, 0);
-    bus.write32(G_MAIN_CALLBACK2, CB2_LOAD_MAP);
+    let route_x = x.clamp(17, 18).wrapping_sub(7);
+    write_route101_warp_into_map(bus, save, route_x, 19);
+    begin_field_map_reload(bus);
     true
 }
 
@@ -1543,6 +2011,252 @@ fn write_littleroot_warp_into_map(bus: &mut Bus, save: u32) {
     bus.write16(GMAP_HEADER + 0x18, 0);
     bus.write8_raw(GMAP_HEADER + 0x1a, 0x0d);
     bus.write8_raw(GMAP_HEADER + 0x1b, 0x00);
+}
+
+fn write_route101_warp_into_map(bus: &mut Bus, save: u32, x: i16, y: i16) {
+    const GMAP_HEADER: u32 = 0x0203_7318;
+
+    bus.write16(save, x as u16);
+    bus.write16(save + 2, y as u16);
+    write_warp_data(bus, save + 4, 0, 16, 0xff, x, y);
+    write_warp_data(bus, save + 0x14, 0, 16, 0xff, x, y);
+    bus.write16(save + 0x32, 0x0011);
+    write_var(bus, save, 0x4060, 1);
+
+    bus.write32(GMAP_HEADER, 0x083e_bc64);
+    bus.write32(GMAP_HEADER + 0x04, 0x0852_7fc4);
+    bus.write32(GMAP_HEADER + 0x08, 0x081e_bcba);
+    bus.write32(GMAP_HEADER + 0x0c, 0x0848_6824);
+    bus.write16(GMAP_HEADER + 0x10, 0x0167);
+    bus.write16(GMAP_HEADER + 0x12, 0x0011);
+    bus.write8_raw(GMAP_HEADER + 0x14, 0x10);
+    bus.write8_raw(GMAP_HEADER + 0x15, 0x00);
+    bus.write8_raw(GMAP_HEADER + 0x16, 0x02);
+    bus.write8_raw(GMAP_HEADER + 0x17, 0x03);
+    bus.write16(GMAP_HEADER + 0x18, 0);
+    bus.write8_raw(GMAP_HEADER + 0x1a, 0x0d);
+    bus.write8_raw(GMAP_HEADER + 0x1b, 0x00);
+}
+
+fn write_birch_lab_warp_into_map(bus: &mut Bus, save: u32, x: i16, y: i16) {
+    const GMAP_HEADER: u32 = 0x0203_7318;
+
+    bus.write16(save, x as u16);
+    bus.write16(save + 2, y as u16);
+    write_warp_data(bus, save + 4, 1, 4, 0xff, x, y);
+    write_warp_data(bus, save + 0x14, 1, 4, 0xff, x, y);
+    bus.write16(save + 0x32, 0x003a);
+
+    bus.write32(GMAP_HEADER, 0x0842_6c88);
+    bus.write32(GMAP_HEADER + 0x04, 0x0852_d7a0);
+    bus.write32(GMAP_HEADER + 0x08, 0x081f_9c91);
+    bus.write32(GMAP_HEADER + 0x0c, 0);
+    bus.write16(GMAP_HEADER + 0x10, 0x017f);
+    bus.write16(GMAP_HEADER + 0x12, 0x003a);
+    bus.write8_raw(GMAP_HEADER + 0x14, 0x00);
+    bus.write8_raw(GMAP_HEADER + 0x15, 0x00);
+    bus.write8_raw(GMAP_HEADER + 0x16, 0x00);
+    bus.write8_raw(GMAP_HEADER + 0x17, 0x08);
+    bus.write16(GMAP_HEADER + 0x18, 0);
+    bus.write8_raw(GMAP_HEADER + 0x1a, 0x00);
+    bus.write8_raw(GMAP_HEADER + 0x1b, 0x00);
+}
+
+fn begin_field_map_reload(bus: &mut Bus) {
+    bus.write32(G_FIELD_CALLBACK, 0);
+    bus.write32(G_FIELD_CALLBACK2, 0);
+    bus.write8_raw(G_MAIN_STATE, 0);
+    bus.write32(G_MAIN_CALLBACK1, 0);
+    bus.write32(G_MAIN_CALLBACK2, CB2_LOAD_MAP);
+    clear_direct_move_state(bus);
+}
+
+fn save_block1(bus: &Bus) -> Option<u32> {
+    let save = bus.read32(GSAVEBLOCK1_PTR);
+    if (0x0200_0000..0x0204_0000).contains(&save) {
+        Some(save)
+    } else {
+        None
+    }
+}
+
+fn save_block2(bus: &Bus) -> Option<u32> {
+    let save = bus.read32(GSAVEBLOCK2_PTR);
+    if (0x0200_0000..0x0204_0000).contains(&save) {
+        Some(save)
+    } else {
+        None
+    }
+}
+
+fn read_var(bus: &Bus, save: u32, var: u16) -> u16 {
+    const VARS_START: u16 = 0x4000;
+    const VARS_OFFSET: u32 = 0x139c;
+
+    if var >= VARS_START {
+        bus.read16(save + VARS_OFFSET + (var - VARS_START) as u32 * 2)
+    } else {
+        0
+    }
+}
+
+fn write_var(bus: &mut Bus, save: u32, var: u16, value: u16) {
+    const VARS_START: u16 = 0x4000;
+    const VARS_OFFSET: u32 = 0x139c;
+
+    if var >= VARS_START {
+        bus.write16(save + VARS_OFFSET + (var - VARS_START) as u32 * 2, value);
+    }
+}
+
+fn set_flag(bus: &mut Bus, save: u32, flag: u16, value: bool) {
+    const FLAGS_OFFSET: u32 = 0x1270;
+
+    let addr = save + FLAGS_OFFSET + (flag as u32 / 8);
+    let mask = 1u8 << (flag & 7);
+    let mut byte = bus.read8(addr);
+    if value {
+        byte |= mask;
+    } else {
+        byte &= !mask;
+    }
+    bus.write8_raw(addr, byte);
+}
+
+fn give_treecko_starter(bus: &mut Bus, save: u32) {
+    const PLAYER_PARTY_COUNT_OFFSET: u32 = 0x234;
+    const PLAYER_PARTY_OFFSET: u32 = 0x238;
+    const POKEMON_SIZE: u32 = 100;
+
+    write_var(bus, save, VAR_STARTER_MON, 0);
+    write_var(bus, save, VAR_ROUTE101_STATE, 3);
+    write_var(bus, save, VAR_BIRCH_LAB_STATE, 2);
+    set_flag(bus, save, FLAG_SYS_POKEMON_GET, true);
+    set_flag(bus, save, FLAG_RESCUED_BIRCH, true);
+    set_flag(bus, save, FLAG_HIDE_ROUTE_101_BIRCH_STARTERS_BAG, true);
+    set_flag(bus, save, FLAG_HIDE_ROUTE_101_BIRCH_ZIGZAGOON_BATTLE, true);
+    set_flag(bus, save, FLAG_HIDE_LITTLEROOT_TOWN_BIRCHS_LAB_BIRCH, false);
+
+    for slot in 0..6 {
+        clear_bytes(
+            bus,
+            save + PLAYER_PARTY_OFFSET + slot * POKEMON_SIZE,
+            POKEMON_SIZE,
+        );
+    }
+    let mon = make_treecko_starter(bus);
+    write_bytes(bus, save + PLAYER_PARTY_OFFSET, &mon);
+    bus.write8_raw(save + PLAYER_PARTY_COUNT_OFFSET, 1);
+}
+
+fn make_treecko_starter(bus: &Bus) -> [u8; 100] {
+    const SPECIES_TREECKO: u16 = 277;
+    const MOVE_POUND: u16 = 1;
+    const MOVE_LEER: u16 = 43;
+    const LEVEL: u8 = 5;
+    const MAIL_NONE: u8 = 0xff;
+    const LANGUAGE_ENGLISH: u8 = 2;
+
+    let personality = 0u32;
+    let save2 = save_block2(bus);
+    let ot_id = save2
+        .map(|save| read32_unaligned(bus, save + 0x0a))
+        .filter(|&id| id != 0)
+        .unwrap_or(0x1234_5678);
+
+    let mut mon = [0u8; 100];
+    write_le32(&mut mon, 0x00, personality);
+    write_le32(&mut mon, 0x04, ot_id);
+    mon[0x08..0x12].copy_from_slice(&[0xce, 0xcc, 0xbf, 0xbf, 0xbd, 0xc5, 0xc9, 0xff, 0xff, 0xff]);
+    mon[0x12] = LANGUAGE_ENGLISH;
+    mon[0x13] = 0x02;
+    if let Some(save) = save2 {
+        for i in 0..7 {
+            mon[0x14 + i] = bus.read8(save + i as u32);
+        }
+    } else {
+        mon[0x14..0x1b].copy_from_slice(&[0xca, 0xc6, 0xbb, 0xd3, 0xbf, 0xcc, 0xff]);
+    }
+
+    let mut secure = [0u8; 48];
+    write_le16(&mut secure, 0x00, SPECIES_TREECKO);
+    write_le32(&mut secure, 0x04, medium_slow_exp(LEVEL));
+    secure[0x08] = 0;
+    secure[0x09] = 70;
+
+    write_le16(&mut secure, 0x0c, MOVE_POUND);
+    write_le16(&mut secure, 0x0e, MOVE_LEER);
+    secure[0x14] = 35;
+    secure[0x15] = 30;
+
+    secure[0x24] = 0;
+    secure[0x25] = 16;
+    let met = 5u16 | (3u16 << 7) | (4u16 << 11);
+    write_le16(&mut secure, 0x26, met);
+
+    let checksum = pokemon_checksum(&secure);
+    write_le16(&mut mon, 0x1c, checksum);
+
+    let key = personality ^ ot_id;
+    for chunk in secure.chunks_exact_mut(4) {
+        let value = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]) ^ key;
+        chunk.copy_from_slice(&value.to_le_bytes());
+    }
+    mon[0x20..0x50].copy_from_slice(&secure);
+
+    write_le32(&mut mon, 0x50, 0);
+    mon[0x54] = LEVEL;
+    mon[0x55] = MAIL_NONE;
+    write_le16(&mut mon, 0x56, 19);
+    write_le16(&mut mon, 0x58, 19);
+    write_le16(&mut mon, 0x5a, 9);
+    write_le16(&mut mon, 0x5c, 8);
+    write_le16(&mut mon, 0x5e, 12);
+    write_le16(&mut mon, 0x60, 11);
+    write_le16(&mut mon, 0x62, 10);
+    mon
+}
+
+fn medium_slow_exp(level: u8) -> u32 {
+    let n = level as u32;
+    (6 * n * n * n) / 5 - 15 * n * n + 100 * n - 140
+}
+
+fn pokemon_checksum(secure: &[u8; 48]) -> u16 {
+    let mut checksum = 0u16;
+    for chunk in secure.chunks_exact(2) {
+        checksum = checksum.wrapping_add(u16::from_le_bytes([chunk[0], chunk[1]]));
+    }
+    checksum
+}
+
+fn clear_bytes(bus: &mut Bus, addr: u32, len: u32) {
+    for off in 0..len {
+        bus.write8_raw(addr + off, 0);
+    }
+}
+
+fn write_bytes(bus: &mut Bus, addr: u32, bytes: &[u8]) {
+    for (off, &byte) in bytes.iter().enumerate() {
+        bus.write8_raw(addr + off as u32, byte);
+    }
+}
+
+fn write_le16(bytes: &mut [u8], offset: usize, value: u16) {
+    bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+}
+
+fn write_le32(bytes: &mut [u8], offset: usize, value: u32) {
+    bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+}
+
+fn read32_unaligned(bus: &Bus, addr: u32) -> u32 {
+    u32::from_le_bytes([
+        bus.read8(addr),
+        bus.read8(addr + 1),
+        bus.read8(addr + 2),
+        bus.read8(addr + 3),
+    ])
 }
 
 fn write_warp_data(bus: &mut Bus, addr: u32, group: u8, num: u8, warp_id: u8, x: i16, y: i16) {

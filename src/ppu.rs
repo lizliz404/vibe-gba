@@ -159,19 +159,30 @@ impl Ppu {
     ) {
         let mode = dispcnt & 7;
         let backdrop = read_mem16(pram, 0);
+        let obj_window = if dispcnt & (1 << 15) != 0 && dispcnt & (1 << 12) != 0 {
+            Some(build_obj_window_mask(dispcnt, vram, oam))
+        } else {
+            None
+        };
+        let obj_layer = if dispcnt & (1 << 12) != 0 {
+            Some(build_obj_layer(dispcnt, vram, pram, oam))
+        } else {
+            None
+        };
         for y in 0..SCREEN_HEIGHT {
             for x in 0..SCREEN_WIDTH {
+                let window = window_mask_at(dispcnt, io, x, y, obj_window.as_deref());
                 let mut first = Pixel {
                     color: backdrop,
                     priority: 4,
-                    order: 7,
+                    order: 255,
                     mask: 1 << 5,
                     semi: false,
                 };
                 let mut second = None;
 
                 for bg in 0..4 {
-                    if dispcnt & (1 << (8 + bg)) == 0 {
+                    if dispcnt & (1 << (8 + bg)) == 0 || window.layers & (1 << bg) == 0 {
                         continue;
                     }
                     let pixel = match (mode, bg) {
@@ -184,13 +195,16 @@ impl Ppu {
                     }
                 }
 
-                if dispcnt & (1 << 12) != 0 {
-                    if let Some(pixel) = obj_pixel_at(x, y, dispcnt, vram, pram, oam) {
+                if dispcnt & (1 << 12) != 0 && window.layers & (1 << 4) != 0 {
+                    if let Some(pixel) = obj_layer
+                        .as_ref()
+                        .and_then(|layer| layer[y * SCREEN_WIDTH + x])
+                    {
                         insert_pixel(&mut first, &mut second, pixel);
                     }
                 }
 
-                let color = apply_blend(first, second, io);
+                let color = apply_blend(first, second, io, window.blend);
                 self.frame[y * SCREEN_WIDTH + x] = bgr555_to_rgb(color);
             }
         }
@@ -211,7 +225,70 @@ fn insert_pixel(first: &mut Pixel, second: &mut Option<Pixel>, pixel: Pixel) {
     }
 }
 
-fn apply_blend(top: Pixel, second: Option<Pixel>, io: &[u8; 0x400]) -> u16 {
+#[derive(Clone, Copy)]
+struct WindowMask {
+    layers: u8,
+    blend: bool,
+}
+
+fn window_mask_at(
+    dispcnt: u16,
+    io: &[u8; 0x400],
+    x: usize,
+    y: usize,
+    obj_window: Option<&[bool]>,
+) -> WindowMask {
+    if dispcnt & 0xe000 == 0 {
+        return window_mask_from_bits(0x3f);
+    }
+
+    let winin = read16(io, 0x048);
+    let winout = read16(io, 0x04a);
+    let bits = if dispcnt & (1 << 13) != 0 && inside_window(io, 0x040, 0x044, x, y) {
+        winin & 0x003f
+    } else if dispcnt & (1 << 14) != 0 && inside_window(io, 0x042, 0x046, x, y) {
+        (winin >> 8) & 0x003f
+    } else if dispcnt & (1 << 15) != 0
+        && obj_window
+            .and_then(|mask| mask.get(y * SCREEN_WIDTH + x))
+            .copied()
+            .unwrap_or(false)
+    {
+        (winout >> 8) & 0x003f
+    } else {
+        winout & 0x003f
+    };
+    window_mask_from_bits(bits)
+}
+
+fn window_mask_from_bits(bits: u16) -> WindowMask {
+    WindowMask {
+        layers: (bits & 0x1f) as u8,
+        blend: bits & (1 << 5) != 0,
+    }
+}
+
+fn inside_window(io: &[u8; 0x400], hoff: usize, voff: usize, x: usize, y: usize) -> bool {
+    let h = read16(io, hoff);
+    let v = read16(io, voff);
+    let left = (h >> 8) as usize;
+    let right = (h & 0xff) as usize;
+    let top = (v >> 8) as usize;
+    let bottom = (v & 0xff) as usize;
+    in_window_range(x, left, right, SCREEN_WIDTH) && in_window_range(y, top, bottom, SCREEN_HEIGHT)
+}
+
+fn in_window_range(value: usize, start: usize, end: usize, limit: usize) -> bool {
+    let start = start.min(limit);
+    let end = end.min(limit);
+    start < end && value >= start && value < end
+}
+
+fn apply_blend(top: Pixel, second: Option<Pixel>, io: &[u8; 0x400], blend_enabled: bool) -> u16 {
+    if !blend_enabled {
+        return top.color;
+    }
+
     let bldcnt = read16(io, 0x050);
     let effect = (bldcnt >> 6) & 3;
     let target1 = bldcnt & 0x3f;
@@ -306,7 +383,7 @@ fn text_bg_pixel(
     Some(Pixel {
         color: read_mem16(pram, color * 2),
         priority: (cnt & 3) as u8,
-        order: (bg + 1) as u8,
+        order: 128 + bg as u8,
         mask: 1 << bg,
         semi: false,
     })
@@ -352,102 +429,185 @@ fn affine_bg_pixel(
     Some(Pixel {
         color: read_mem16(pram, color * 2),
         priority: (cnt & 3) as u8,
-        order: (bg + 1) as u8,
+        order: 128 + bg as u8,
         mask: 1 << bg,
         semi: false,
     })
 }
 
-fn obj_pixel_at(
-    x: usize,
-    y: usize,
-    dispcnt: u16,
-    vram: &[u8],
-    pram: &[u8],
-    oam: &[u8],
-) -> Option<Pixel> {
+fn build_obj_layer(dispcnt: u16, vram: &[u8], pram: &[u8], oam: &[u8]) -> Vec<Option<Pixel>> {
+    let mut layer = vec![None; SCREEN_WIDTH * SCREEN_HEIGHT];
     for obj in 0..128 {
         let base = obj * 8;
         let attr0 = read_mem16(oam, base);
         let attr1 = read_mem16(oam, base + 2);
         let attr2 = read_mem16(oam, base + 4);
-        if attr0 & (1 << 9) != 0 && attr0 & (1 << 8) == 0 {
+        let obj_mode = (attr0 >> 10) & 3;
+        if obj_mode >= 2 {
             continue;
         }
-        let (w, h) = obj_size(attr0 >> 14, attr1 >> 14);
-        let affine = attr0 & (1 << 8) != 0;
-        let draw_w = if affine && attr0 & (1 << 9) != 0 {
-            w * 2
-        } else {
-            w
-        };
-        let draw_h = if affine && attr0 & (1 << 9) != 0 {
-            h * 2
-        } else {
-            h
-        };
-        let ox = signed_obj_x(attr1 & 0x01ff);
-        let oy = signed_obj_y(attr0 & 0x00ff);
-        let px = x as i32 - ox;
-        let py = y as i32 - oy;
-        if px < 0 || py < 0 || px >= draw_w as i32 || py >= draw_h as i32 {
+        let Some((x0, x1, y0, y1)) = obj_bounds(attr0, attr1) else {
             continue;
-        }
-
-        let (mut tx, mut ty) = if affine {
-            affine_obj_coords(
-                obj,
-                attr1,
-                px,
-                py,
-                w as i32,
-                h as i32,
-                draw_w as i32,
-                draw_h as i32,
-                oam,
-            )
-        } else {
-            (px, py)
         };
-        if tx < 0 || ty < 0 || tx >= w as i32 || ty >= h as i32 {
-            continue;
-        }
-        if !affine {
-            if attr1 & (1 << 12) != 0 {
-                tx = w as i32 - 1 - tx;
-            }
-            if attr1 & (1 << 13) != 0 {
-                ty = h as i32 - 1 - ty;
+        for py in y0..y1 {
+            for px in x0..x1 {
+                let Some(color) =
+                    obj_color_index_at(obj, px, py, dispcnt, attr0, attr1, attr2, vram, oam)
+                else {
+                    continue;
+                };
+                let palette_index = if attr0 & (1 << 13) != 0 {
+                    0x100 + color as usize
+                } else {
+                    0x100 + ((attr2 >> 12) as usize) * 16 + color as usize
+                };
+                insert_obj_layer_pixel(
+                    &mut layer[py * SCREEN_WIDTH + px],
+                    Pixel {
+                        color: read_mem16(pram, palette_index * 2),
+                        priority: ((attr2 >> 10) & 3) as u8,
+                        order: obj as u8,
+                        mask: 1 << 4,
+                        semi: obj_mode == 1,
+                    },
+                );
             }
         }
-        let color_256 = attr0 & (1 << 13) != 0;
-        let tile = (attr2 & 0x03ff) as usize;
-        let color = obj_tile_color(
-            tile,
-            tx as usize,
-            ty as usize,
-            w,
-            color_256,
-            dispcnt & (1 << 6) != 0,
-            vram,
-        );
-        if color == 0 {
-            continue;
-        }
-        let palette_index = if color_256 {
-            0x100 + color as usize
-        } else {
-            0x100 + ((attr2 >> 12) as usize) * 16 + color as usize
-        };
-        return Some(Pixel {
-            color: read_mem16(pram, palette_index * 2),
-            priority: ((attr2 >> 10) & 3) as u8,
-            order: 0,
-            mask: 1 << 4,
-            semi: ((attr0 >> 10) & 3) == 1,
-        });
     }
-    None
+    layer
+}
+
+fn insert_obj_layer_pixel(slot: &mut Option<Pixel>, pixel: Pixel) {
+    if slot
+        .map(|old| (pixel.priority, pixel.order) < (old.priority, old.order))
+        .unwrap_or(true)
+    {
+        *slot = Some(pixel);
+    }
+}
+
+fn build_obj_window_mask(dispcnt: u16, vram: &[u8], oam: &[u8]) -> Vec<bool> {
+    let mut mask = vec![false; SCREEN_WIDTH * SCREEN_HEIGHT];
+    for obj in 0..128 {
+        let base = obj * 8;
+        let attr0 = read_mem16(oam, base);
+        if (attr0 >> 10) & 3 != 2 {
+            continue;
+        }
+        let attr1 = read_mem16(oam, base + 2);
+        let attr2 = read_mem16(oam, base + 4);
+        let Some((x0, x1, y0, y1)) = obj_bounds(attr0, attr1) else {
+            continue;
+        };
+        for py in y0..y1 {
+            for px in x0..x1 {
+                if obj_color_index_at(obj, px, py, dispcnt, attr0, attr1, attr2, vram, oam)
+                    .is_some()
+                {
+                    mask[py * SCREEN_WIDTH + px] = true;
+                }
+            }
+        }
+    }
+    mask
+}
+
+fn obj_color_index_at(
+    obj: usize,
+    x: usize,
+    y: usize,
+    dispcnt: u16,
+    attr0: u16,
+    attr1: u16,
+    attr2: u16,
+    vram: &[u8],
+    oam: &[u8],
+) -> Option<u8> {
+    if attr0 & (1 << 9) != 0 && attr0 & (1 << 8) == 0 {
+        return None;
+    }
+    let (w, h) = obj_size(attr0 >> 14, attr1 >> 14);
+    let affine = attr0 & (1 << 8) != 0;
+    let draw_w = if affine && attr0 & (1 << 9) != 0 {
+        w * 2
+    } else {
+        w
+    };
+    let draw_h = if affine && attr0 & (1 << 9) != 0 {
+        h * 2
+    } else {
+        h
+    };
+    let ox = signed_obj_x(attr1 & 0x01ff);
+    let oy = signed_obj_y(attr0 & 0x00ff);
+    let px = x as i32 - ox;
+    let py = y as i32 - oy;
+    if px < 0 || py < 0 || px >= draw_w as i32 || py >= draw_h as i32 {
+        return None;
+    }
+
+    let (mut tx, mut ty) = if affine {
+        affine_obj_coords(
+            obj,
+            attr1,
+            px,
+            py,
+            w as i32,
+            h as i32,
+            draw_w as i32,
+            draw_h as i32,
+            oam,
+        )
+    } else {
+        (px, py)
+    };
+    if tx < 0 || ty < 0 || tx >= w as i32 || ty >= h as i32 {
+        return None;
+    }
+    if !affine {
+        if attr1 & (1 << 12) != 0 {
+            tx = w as i32 - 1 - tx;
+        }
+        if attr1 & (1 << 13) != 0 {
+            ty = h as i32 - 1 - ty;
+        }
+    }
+
+    let color = obj_tile_color(
+        (attr2 & 0x03ff) as usize,
+        tx as usize,
+        ty as usize,
+        w,
+        attr0 & (1 << 13) != 0,
+        dispcnt & (1 << 6) != 0,
+        vram,
+    );
+    (color != 0).then_some(color)
+}
+
+fn obj_bounds(attr0: u16, attr1: u16) -> Option<(usize, usize, usize, usize)> {
+    if attr0 & (1 << 9) != 0 && attr0 & (1 << 8) == 0 {
+        return None;
+    }
+    let (w, h) = obj_size(attr0 >> 14, attr1 >> 14);
+    let affine = attr0 & (1 << 8) != 0;
+    let draw_w = if affine && attr0 & (1 << 9) != 0 {
+        w * 2
+    } else {
+        w
+    } as i32;
+    let draw_h = if affine && attr0 & (1 << 9) != 0 {
+        h * 2
+    } else {
+        h
+    } as i32;
+    let ox = signed_obj_x(attr1 & 0x01ff);
+    let oy = signed_obj_y(attr0 & 0x00ff);
+    let x0 = ox.max(0) as usize;
+    let y0 = oy.max(0) as usize;
+    let x1 = (ox + draw_w).min(SCREEN_WIDTH as i32).max(0) as usize;
+    let y1 = (oy + draw_h).min(SCREEN_HEIGHT as i32).max(0) as usize;
+    (x0 < x1 && y0 < y1).then_some((x0, x1, y0, y1))
 }
 
 fn affine_obj_coords(

@@ -274,6 +274,7 @@ impl Gba {
                 self.write_object_event(out, object_id, base);
             }
         }
+        self.write_save_progress_debug(out);
     }
 
     fn write_object_event(&self, out: &mut String, object_id: u8, base: u32) {
@@ -314,8 +315,110 @@ impl Gba {
             self.bus.read8(base + 0x22),
         );
     }
+
+    fn write_save_progress_debug(&self, out: &mut String) {
+        use std::fmt::Write;
+
+        const GSAVEBLOCK1_PTR: u32 = 0x0300_5d8c;
+        const VAR_STARTER_MON: u16 = 0x4023;
+        const VAR_ROUTE101_STATE: u16 = 0x4060;
+        const VAR_BIRCH_LAB_STATE: u16 = 0x4084;
+        const FLAG_RESCUED_BIRCH: u16 = 0x052;
+        const FLAG_HIDE_ROUTE_101_BIRCH_STARTERS_BAG: u16 = 0x2bc;
+        const FLAG_HIDE_ROUTE_101_BIRCH_ZIGZAGOON_BATTLE: u16 = 0x2d0;
+        const FLAG_HIDE_LITTLEROOT_TOWN_BIRCHS_LAB_BIRCH: u16 = 0x2d1;
+        const FLAG_HIDE_ROUTE_101_BOY: u16 = 0x3df;
+        const FLAG_SYS_POKEMON_GET: u16 = 0x860;
+
+        let save = self.bus.read32(GSAVEBLOCK1_PTR);
+        if !(0x0200_0000..0x0204_0000).contains(&save) {
+            return;
+        }
+
+        let party_count = self.bus.read8(save + 0x234);
+        let mon = save + 0x238;
+        let personality = self.bus.read32(mon);
+        let ot_id = self.bus.read32(mon + 4);
+        let key = personality ^ ot_id;
+        let sub0 = pokemon_substruct_index(personality, 0) as u32;
+        let sub0_word0 = self.bus.read32(mon + 0x20 + sub0 * 12) ^ key;
+        let starter_species = sub0_word0 as u16;
+
+        let _ = writeln!(
+            out,
+            "SAVE save1={save:08x} route101={} birch_lab={} starter={} party_count={} starter_species={} starter_level={} starter_hp={}/{} starter_checksum={:04x}",
+            save_var(&self.bus, save, VAR_ROUTE101_STATE),
+            save_var(&self.bus, save, VAR_BIRCH_LAB_STATE),
+            save_var(&self.bus, save, VAR_STARTER_MON),
+            party_count,
+            starter_species,
+            self.bus.read8(mon + 0x54),
+            self.bus.read16(mon + 0x56),
+            self.bus.read16(mon + 0x58),
+            self.bus.read16(mon + 0x1c),
+        );
+        let _ = writeln!(
+            out,
+            "SAVE_FLAGS pokemon_get={} rescued_birch={} hide_bag={} hide_zigzagoon={} hide_lab_birch={} route101_boy={}",
+            save_flag(&self.bus, save, FLAG_SYS_POKEMON_GET),
+            save_flag(&self.bus, save, FLAG_RESCUED_BIRCH),
+            save_flag(&self.bus, save, FLAG_HIDE_ROUTE_101_BIRCH_STARTERS_BAG),
+            save_flag(&self.bus, save, FLAG_HIDE_ROUTE_101_BIRCH_ZIGZAGOON_BATTLE),
+            save_flag(&self.bus, save, FLAG_HIDE_LITTLEROOT_TOWN_BIRCHS_LAB_BIRCH),
+            save_flag(&self.bus, save, FLAG_HIDE_ROUTE_101_BOY),
+        );
+    }
 }
 
 fn valid_pc(pc: u32) -> bool {
     pc <= 0x0dff_ffff
+}
+
+fn save_var(bus: &Bus, save: u32, var: u16) -> u16 {
+    const VARS_START: u16 = 0x4000;
+    const VARS_OFFSET: u32 = 0x139c;
+
+    if var >= VARS_START {
+        bus.read16(save + VARS_OFFSET + (var - VARS_START) as u32 * 2)
+    } else {
+        0
+    }
+}
+
+fn save_flag(bus: &Bus, save: u32, flag: u16) -> bool {
+    const FLAGS_OFFSET: u32 = 0x1270;
+
+    let byte = bus.read8(save + FLAGS_OFFSET + (flag as u32 / 8));
+    byte & (1u8 << (flag & 7)) != 0
+}
+
+fn pokemon_substruct_index(personality: u32, substruct_type: usize) -> usize {
+    const ORDERS: [[usize; 4]; 24] = [
+        [0, 1, 2, 3],
+        [0, 1, 3, 2],
+        [0, 2, 1, 3],
+        [0, 3, 1, 2],
+        [0, 2, 3, 1],
+        [0, 3, 2, 1],
+        [1, 0, 2, 3],
+        [1, 0, 3, 2],
+        [2, 0, 1, 3],
+        [3, 0, 1, 2],
+        [2, 0, 3, 1],
+        [3, 0, 2, 1],
+        [1, 2, 0, 3],
+        [1, 3, 0, 2],
+        [2, 1, 0, 3],
+        [3, 1, 0, 2],
+        [2, 3, 0, 1],
+        [3, 2, 0, 1],
+        [1, 2, 3, 0],
+        [1, 3, 2, 0],
+        [2, 1, 3, 0],
+        [3, 1, 2, 0],
+        [2, 3, 1, 0],
+        [3, 2, 1, 0],
+    ];
+
+    ORDERS[(personality % 24) as usize][substruct_type]
 }
