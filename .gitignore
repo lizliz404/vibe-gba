@@ -1,0 +1,17 @@
+/target/
+
+# ROMs, saves, and emulator state snapshots are not redistributable project assets.
+*.gba
+*.sav
+*.srm
+*.state
+*.bin
+/states/
+
+# Local debug captures. Curated screenshots live under docs/screenshots/.
+/*.png
+!docs/
+!docs/screenshots/
+!docs/screenshots/*.png
+
+.DS_Store

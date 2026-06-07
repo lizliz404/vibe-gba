@@ -1,0 +1,12 @@
+[package]
+name = "vibe-gba"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bincode = "1.3"
+minifb = "0.27"
+png = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde-big-array = "0.5"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
