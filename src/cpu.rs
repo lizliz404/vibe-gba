@@ -32,6 +32,22 @@ const DIRECT_MOVE_STEPS: u8 = 8;
 const STARTER_HLE_A_STATE: u32 = 0x0300_30b4;
 const STARTER_HLE_A_WAS_DOWN: u32 = 1 << 0;
 const STARTER_HLE_WAIT_A_RELEASE: u32 = 1 << 1;
+const GAMEPLAY_HLE_ENABLED: bool = false;
+const LEGACY_FLOW_HLE_ENABLED: bool = false;
+const G_MPLAY_INFO_BGM: u32 = 0x0300_7420;
+const MPLAY_STATUS_TRACK: u32 = 0x0000_ffff;
+const MPLAY_STATUS_PAUSE: u32 = 0x8000_0000;
+const MPLAY_INFO_STATUS: u32 = 0x04;
+const MPLAY_INFO_TRACK_COUNT: u32 = 0x08;
+const MPLAY_INFO_FADE_OI: u32 = 0x24;
+const MPLAY_INFO_FADE_OC: u32 = 0x26;
+const MPLAY_INFO_FADE_OV: u32 = 0x28;
+const MPLAY_INFO_TRACKS: u32 = 0x2c;
+const MUSIC_PLAYER_TRACK_SIZE: u32 = 0x50;
+const MPT_FLG_EXIST: u8 = 0x80;
+const FADE_IN: u16 = 0x0002;
+const FADE_VOL_MAX: u16 = 64;
+const FADE_VOL_SHIFT: u16 = 2;
 const VAR_STARTER_MON: u16 = 0x4023;
 const VAR_ROUTE101_STATE: u16 = 0x4060;
 const VAR_BIRCH_LAB_STATE: u16 = 0x4084;
@@ -41,6 +57,84 @@ const FLAG_HIDE_ROUTE_101_BIRCH_ZIGZAGOON_BATTLE: u16 = 0x2d0;
 const FLAG_HIDE_LITTLEROOT_TOWN_BIRCHS_LAB_BIRCH: u16 = 0x2d1;
 const FLAG_HIDE_ROUTE_101_BOY: u16 = 0x3df;
 const FLAG_SYS_POKEMON_GET: u16 = 0x860;
+
+#[derive(Clone, Copy)]
+struct PcWatch {
+    pc: u32,
+    name: &'static str,
+}
+
+const PC_WATCH_COUNT: usize = 17;
+const PC_WATCH: [PcWatch; PC_WATCH_COUNT] = [
+    PcWatch {
+        pc: 0x0809_8d10,
+        name: "RunScriptCommand",
+    },
+    PcWatch {
+        pc: 0x0809_8ebc,
+        name: "ScriptContext_RunScript",
+    },
+    PcWatch {
+        pc: 0x0808_a9c0,
+        name: "PlayerStep",
+    },
+    PcWatch {
+        pc: 0x0809_c014,
+        name: "ProcessPlayerFieldInput",
+    },
+    PcWatch {
+        pc: 0x0809_bf08,
+        name: "FieldGetPlayerInput",
+    },
+    PcWatch {
+        pc: 0x0809_bedc,
+        name: "FieldClearPlayerInput",
+    },
+    PcWatch {
+        pc: 0x0809_8e6c,
+        name: "ArePlayerFieldControlsLocked",
+    },
+    PcWatch {
+        pc: 0x0809_8e54,
+        name: "LockPlayerFieldControls",
+    },
+    PcWatch {
+        pc: 0x0809_8e60,
+        name: "UnlockPlayerFieldControls",
+    },
+    PcWatch {
+        pc: 0x0809_8e78,
+        name: "ScriptContext_IsEnabled",
+    },
+    PcWatch {
+        pc: 0x0809_9d94,
+        name: "RunPauseTimer",
+    },
+    PcWatch {
+        pc: 0x0809_9db4,
+        name: "ScrCmd_delay",
+    },
+    PcWatch {
+        pc: 0x0809_a4b4,
+        name: "ScrCmd_playse",
+    },
+    PcWatch {
+        pc: 0x0809_a5e8,
+        name: "ScrCmd_applymovement",
+    },
+    PcWatch {
+        pc: 0x0809_a698,
+        name: "ScrCmd_waitmovement",
+    },
+    PcWatch {
+        pc: 0x0808_5dac,
+        name: "DoCB1_Overworld",
+    },
+    PcWatch {
+        pc: 0x0808_5e04,
+        name: "CB1_Overworld",
+    },
+];
 
 #[derive(Clone, Deserialize, Serialize)]
 struct IrqFrame {
@@ -59,6 +153,8 @@ pub struct Cpu {
     last_pc: u32,
     last_instr: u32,
     last_thumb: bool,
+    #[serde(skip)]
+    pc_watch_hits: [u32; PC_WATCH_COUNT],
 }
 
 impl Cpu {
@@ -76,6 +172,7 @@ impl Cpu {
             last_pc: 0,
             last_instr: 0,
             last_thumb: false,
+            pc_watch_hits: [0; PC_WATCH_COUNT],
         }
     }
 
@@ -87,9 +184,21 @@ impl Cpu {
         self.r[13]
     }
 
+    pub fn set_trace(&mut self, trace: bool) {
+        self.trace = trace;
+    }
+
+    fn record_pc_watch(&mut self, pc: u32) {
+        for (idx, watch) in PC_WATCH.iter().enumerate() {
+            if pc == watch.pc {
+                self.pc_watch_hits[idx] = self.pc_watch_hits[idx].saturating_add(1);
+            }
+        }
+    }
+
     pub fn debug_summary(&self) -> String {
         let mut out = format!(
-            "CPU pc={:08x} lr={:08x} sp={:08x} cpsr={:08x} thumb={} halted={} wait={:?} irq_hle={} last={:08x}:{:08x}:{}",
+            "CPU pc={:08x} lr={:08x} sp={:08x} cpsr={:08x} thumb={} halted={} wait={:?} irq_hle={} gameplay_hle={} legacy_flow_hle={} last={:08x}:{:08x}:{}",
             self.r[15],
             self.r[14],
             self.r[13],
@@ -98,11 +207,21 @@ impl Cpu {
             self.halted,
             self.wait_flags,
             self.irq_frame.is_some(),
+            GAMEPLAY_HLE_ENABLED,
+            LEGACY_FLOW_HLE_ENABLED,
             self.last_pc,
             self.last_instr,
             if self.last_thumb { "thumb" } else { "arm" }
         );
         use std::fmt::Write;
+        let _ = write!(out, "\nPC_HITS");
+        for (idx, watch) in PC_WATCH.iter().enumerate() {
+            let _ = write!(
+                out,
+                " {}@{:08x}={}",
+                watch.name, watch.pc, self.pc_watch_hits[idx]
+            );
+        }
         for row in 0..4 {
             let _ = write!(out, "\nr{:02}-r{:02}", row * 4, row * 4 + 3);
             for col in 0..4 {
@@ -142,6 +261,8 @@ impl Cpu {
 
         if self.is_thumb() {
             let pc = self.r[15] & !1;
+            bus.set_write_pc(pc);
+            self.record_pc_watch(pc);
             let instr = bus.read16(pc);
             self.last_pc = pc;
             self.last_instr = instr as u32;
@@ -154,6 +275,8 @@ impl Cpu {
             1
         } else {
             let pc = self.r[15] & !3;
+            bus.set_write_pc(pc);
+            self.record_pc_watch(pc);
             let instr = bus.read32(pc);
             self.last_pc = pc;
             self.last_instr = instr;
@@ -1018,11 +1141,16 @@ impl Cpu {
         let pc = self.r[15] & !3;
         let valid_return = (0x0800_0000..0x0e00_0000).contains(&self.r[14])
             || (0x0300_0000..0x0300_8000).contains(&self.r[14]);
-        self.try_direct_player_input_per_frame(bus);
+        if GAMEPLAY_HLE_ENABLED {
+            self.try_direct_player_input_per_frame(bus);
+        } else {
+            clear_direct_move_state(bus);
+        }
         if self.irq_frame.is_some()
             && ((0x082d_f050..0x082d_f130).contains(&current_pc)
                 || (0x0300_1a00..0x0300_2200).contains(&current_pc))
         {
+            sync_sound_main_hle(bus);
             bus.clear_if(0xffff);
             self.leave_irq_hle();
             return true;
@@ -1035,7 +1163,7 @@ impl Cpu {
             self.leave_irq_hle();
             return true;
         }
-        if self.cpsr & FLAG_T != 0 && pending_littleroot_transition(bus) {
+        if GAMEPLAY_HLE_ENABLED && self.cpsr & FLAG_T != 0 && pending_littleroot_transition(bus) {
             if (0x0800_7640..=0x0800_767c).contains(&current_pc)
                 && self.thumb_return_from_stack(bus, 3)
             {
@@ -1053,6 +1181,7 @@ impl Cpu {
             }
         }
         if self.cpsr & FLAG_T != 0
+            && GAMEPLAY_HLE_ENABLED
             && valid_return
             && matches!(current_pc, 0x0808_a998 | 0x0808_fd8c)
             && self.try_player_movement_hle(bus)
@@ -1061,6 +1190,7 @@ impl Cpu {
             return true;
         }
         if self.cpsr & FLAG_T != 0
+            && LEGACY_FLOW_HLE_ENABLED
             && valid_return
             && matches!(current_pc, 0x0800_69c0 | 0x0800_6a0c)
             && bus.read32(0x0300_22c4) != 0x0808_5e5d
@@ -1077,6 +1207,7 @@ impl Cpu {
             return true;
         }
         if self.cpsr & FLAG_T != 0
+            && LEGACY_FLOW_HLE_ENABLED
             && valid_return
             && current_pc == 0x080e_4f58
             && ((!bus.read16(0x0400_0130)) & 0x03ff) != 0
@@ -1085,7 +1216,11 @@ impl Cpu {
             self.branch_to(self.r[14]);
             return true;
         }
-        if self.cpsr & FLAG_T != 0 && valid_return && current_pc == 0x0803_1580 {
+        if self.cpsr & FLAG_T != 0
+            && LEGACY_FLOW_HLE_ENABLED
+            && valid_return
+            && current_pc == 0x0803_1580
+        {
             let task_id = self.r[0] & 0xff;
             let task = 0x0300_5e00 + task_id * 40;
             bus.write32(task, 0x0803_15bd);
@@ -1108,7 +1243,7 @@ impl Cpu {
             self.branch_to(self.r[14]);
             return true;
         }
-        if self.cpsr & FLAG_T != 0 && current_pc == 0x0816_cc00 {
+        if self.cpsr & FLAG_T != 0 && LEGACY_FLOW_HLE_ENABLED && current_pc == 0x0816_cc00 {
             let pressed = (!bus.read16(0x0400_0130)) & 0x03ff;
             if pressed != 0 {
                 bus.write32(0x0300_22c4, 0x0816_cc55);
@@ -1118,6 +1253,7 @@ impl Cpu {
             }
         }
         if self.cpsr & FLAG_T != 0
+            && LEGACY_FLOW_HLE_ENABLED
             && bus.read32(0x0300_22c4) == 0x0816_cc01
             && ((!bus.read16(0x0400_0130)) & 0x03ff) != 0
             && bus.read32(0x0300_7e18) == 0x0800_0535
@@ -1130,6 +1266,7 @@ impl Cpu {
             return true;
         }
         if self.cpsr & FLAG_T != 0
+            && LEGACY_FLOW_HLE_ENABLED
             && bus.read32(0x0300_22c4) == 0x080a_ab2d
             && ((!bus.read16(0x0400_0130)) & 0x03ff) != 0
             && bus.read32(0x0300_7e18) == 0x0800_0535
@@ -2228,6 +2365,86 @@ fn pokemon_checksum(secure: &[u8; 48]) -> u16 {
         checksum = checksum.wrapping_add(u16::from_le_bytes([chunk[0], chunk[1]]));
     }
     checksum
+}
+
+fn sync_sound_main_hle(bus: &mut Bus) {
+    sync_music_player_hle(bus, G_MPLAY_INFO_BGM);
+}
+
+fn sync_music_player_hle(bus: &mut Bus, mplay: u32) {
+    if !is_ram_ptr(mplay) {
+        return;
+    }
+
+    step_music_player_fade(bus, mplay);
+
+    let track_count = bus.read8(mplay + MPLAY_INFO_TRACK_COUNT).min(16);
+    let tracks = bus.read32(mplay + MPLAY_INFO_TRACKS);
+    if track_count == 0 || !is_ram_ptr(tracks) {
+        return;
+    }
+
+    let mut track_bits = 0u32;
+    for idx in 0..track_count {
+        let track = tracks + u32::from(idx) * MUSIC_PLAYER_TRACK_SIZE;
+        if bus.read8(track) & MPT_FLG_EXIST != 0 {
+            track_bits |= 1 << idx;
+        }
+    }
+
+    let status = bus.read32(mplay + MPLAY_INFO_STATUS);
+    let synced = (status & !MPLAY_STATUS_TRACK) | track_bits;
+    if synced != status {
+        bus.write32(mplay + MPLAY_INFO_STATUS, synced);
+    }
+}
+
+fn step_music_player_fade(bus: &mut Bus, mplay: u32) {
+    let fade_oi = bus.read16(mplay + MPLAY_INFO_FADE_OI);
+    if fade_oi == 0 {
+        return;
+    }
+
+    let fade_oc = bus.read16(mplay + MPLAY_INFO_FADE_OC);
+    if fade_oc > 1 {
+        bus.write16(mplay + MPLAY_INFO_FADE_OC, fade_oc - 1);
+        return;
+    }
+
+    bus.write16(mplay + MPLAY_INFO_FADE_OC, fade_oi);
+    let fade_ov = bus.read16(mplay + MPLAY_INFO_FADE_OV);
+    if fade_ov & FADE_IN != 0 {
+        let next = fade_ov.saturating_add(4 << FADE_VOL_SHIFT);
+        if next >= FADE_VOL_MAX << FADE_VOL_SHIFT {
+            bus.write16(mplay + MPLAY_INFO_FADE_OV, FADE_VOL_MAX << FADE_VOL_SHIFT);
+            bus.write16(mplay + MPLAY_INFO_FADE_OI, 0);
+        } else {
+            bus.write16(mplay + MPLAY_INFO_FADE_OV, next);
+        }
+        return;
+    }
+
+    let next = (fade_ov as i16) - ((4 << FADE_VOL_SHIFT) as i16);
+    if next > 0 {
+        bus.write16(mplay + MPLAY_INFO_FADE_OV, next as u16);
+        return;
+    }
+
+    let track_count = bus.read8(mplay + MPLAY_INFO_TRACK_COUNT).min(16);
+    let tracks = bus.read32(mplay + MPLAY_INFO_TRACKS);
+    if is_ram_ptr(tracks) {
+        for idx in 0..track_count {
+            let track = tracks + u32::from(idx) * MUSIC_PLAYER_TRACK_SIZE;
+            bus.write8_raw(track, 0);
+        }
+    }
+    bus.write32(mplay + MPLAY_INFO_STATUS, MPLAY_STATUS_PAUSE);
+    bus.write16(mplay + MPLAY_INFO_FADE_OI, 0);
+    bus.write16(mplay + MPLAY_INFO_FADE_OV, 0);
+}
+
+fn is_ram_ptr(addr: u32) -> bool {
+    (0x0200_0000..0x0204_0000).contains(&addr) || (0x0300_0000..0x0300_8000).contains(&addr)
 }
 
 fn clear_bytes(bus: &mut Bus, addr: u32, len: u32) {

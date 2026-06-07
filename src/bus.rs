@@ -25,6 +25,14 @@ struct IoWrite {
     value: u32,
 }
 
+#[derive(Clone, Copy, Deserialize, Serialize)]
+struct WatchWrite {
+    frame: u64,
+    pc: u32,
+    addr: u32,
+    value: u8,
+}
+
 #[derive(Deserialize, Serialize)]
 pub struct Bus {
     rom: Vec<u8>,
@@ -42,6 +50,10 @@ pub struct Bus {
     flash: Flash,
     frame: u64,
     io_log: Vec<IoWrite>,
+    #[serde(skip)]
+    watch_log: Vec<WatchWrite>,
+    #[serde(skip)]
+    write_pc: u32,
 }
 
 impl Bus {
@@ -68,6 +80,8 @@ impl Bus {
             flash,
             frame: 0,
             io_log: Vec::with_capacity(64),
+            watch_log: Vec::with_capacity(256),
+            write_pc: 0,
         }
     }
 
@@ -77,6 +91,10 @@ impl Bus {
 
     pub fn framebuffer(&self) -> &[u32] {
         &self.ppu.frame
+    }
+
+    pub fn set_write_pc(&mut self, pc: u32) {
+        self.write_pc = pc;
     }
 
     pub fn debug_summary(&self) -> String {
@@ -181,6 +199,18 @@ impl Bus {
                 item.frame, item.off, item.size, item.value
             );
         }
+        let _ = writeln!(out, "WATCHLOG");
+        for item in &self.watch_log {
+            let _ = writeln!(
+                out,
+                "  f={} pc={:08x} addr={:08x} {} value={:02x}",
+                item.frame,
+                item.pc,
+                item.addr,
+                watch_name(item.addr).unwrap_or_else(|| "-".to_string()),
+                item.value
+            );
+        }
         for ch in 0..4 {
             let base = 0x0b0 + ch * 12;
             let _ = writeln!(
@@ -224,8 +254,6 @@ impl Bus {
                 let ie = self.read_io16(0x200) | 1;
                 write_io_raw16(&mut self.io, 0x200, ie);
             }
-            self.process_emerald_dma3_requests();
-            self.mirror_emerald_window_tiles();
             self.run_dma_timing(1);
         }
         if events.frame {
@@ -315,6 +343,7 @@ impl Bus {
     }
 
     pub fn write8(&mut self, addr: u32, value: u8) {
+        self.log_watch_write(addr, value);
         match addr {
             0x0200_0000..=0x02ff_ffff => {
                 let off = addr as usize & (EWRAM_SIZE - 1);
@@ -364,6 +393,7 @@ impl Bus {
     }
 
     pub fn write8_raw(&mut self, addr: u32, value: u8) {
+        self.log_watch_write(addr, value);
         match addr {
             0x0200_0000..=0x02ff_ffff => {
                 let off = addr as usize & (EWRAM_SIZE - 1);
@@ -425,6 +455,21 @@ impl Bus {
             frame: self.frame,
             off,
             size,
+            value,
+        });
+    }
+
+    fn log_watch_write(&mut self, addr: u32, value: u8) {
+        if watch_name(addr).is_none() {
+            return;
+        }
+        if self.watch_log.len() == 256 {
+            self.watch_log.remove(0);
+        }
+        self.watch_log.push(WatchWrite {
+            frame: self.frame,
+            pc: self.write_pc,
+            addr,
             value,
         });
     }
@@ -641,100 +686,94 @@ impl Bus {
             }
         }
     }
+}
 
-    fn process_emerald_dma3_requests(&mut self) {
-        const DMA3_REQUESTS: u32 = 0x0300_0938;
-        const DMA3_REQUEST_SIZE: u32 = 16;
+fn watch_name(addr: u32) -> Option<String> {
+    const S_PAUSE_COUNTER: u32 = 0x0203_75c8;
+    const G_OBJECT_EVENTS: u32 = 0x0203_7350;
+    const G_PLAYER_AVATAR: u32 = 0x0203_7590;
+    const S_SCRIPT_STATUS: u32 = 0x0300_0e38;
+    const S_SCRIPT_CONTEXT: u32 = 0x0300_0e40;
+    const S_LOCK_FIELD_CONTROLS: u32 = 0x0300_0f2c;
+    const OBJECT_EVENT_SIZE: u32 = 0x24;
+    const OBJECT_EVENTS_COUNT: u32 = 16;
 
-        for idx in 0..128 {
-            let base = DMA3_REQUESTS + idx * DMA3_REQUEST_SIZE;
-            let src = self.read32(base);
-            let dst = self.read32(base + 4);
-            let size = self.read16(base + 8) as u32;
-            let mode = self.read16(base + 10);
-            let value = self.read32(base + 12);
-
-            if size == 0 {
-                continue;
-            }
-
-            match mode {
-                1 => {
-                    let words = (size + 3) / 4;
-                    for i in 0..words {
-                        let off = i * 4;
-                        self.write32(dst + off, self.read32(src + off));
-                    }
-                }
-                2 => {
-                    let words = (size + 3) / 4;
-                    for i in 0..words {
-                        self.write32(dst + i * 4, value);
-                    }
-                }
-                3 => {
-                    let halfwords = (size + 1) / 2;
-                    for i in 0..halfwords {
-                        let off = i * 2;
-                        self.write16(dst + off, self.read16(src + off));
-                    }
-                }
-                4 => {
-                    let halfwords = (size + 1) / 2;
-                    for i in 0..halfwords {
-                        self.write16(dst + i * 2, value as u16);
-                    }
-                }
-                _ => {}
-            }
-
-            self.write32(base, 0);
-            self.write32(base + 4, 0);
-            self.write16(base + 8, 0);
-            self.write16(base + 10, 0);
-            self.write32(base + 12, 0);
-        }
+    if (S_PAUSE_COUNTER..S_PAUSE_COUNTER + 2).contains(&addr) {
+        return Some(format!("script.pause+{}", addr - S_PAUSE_COUNTER));
     }
 
-    fn mirror_emerald_window_tiles(&mut self) {
-        const G_WINDOWS: u32 = 0x0202_0004;
-        const WINDOW_SIZE: u32 = 12;
-
-        for window_id in 0..32 {
-            let base = G_WINDOWS + window_id * WINDOW_SIZE;
-            let bg = self.read8(base);
-            if bg > 3 {
-                continue;
-            }
-
-            let width = self.read8(base + 3) as u32;
-            let height = self.read8(base + 4) as u32;
-            if width == 0 || height == 0 || width > 32 || height > 32 {
-                continue;
-            }
-
-            let base_block = self.read16(base + 6) as u32;
-            let tile_data = self.read32(base + 8);
-            if !(0x0200_0000..0x0204_0000).contains(&tile_data) {
-                continue;
-            }
-
-            let bgcnt = self.read_io16(0x008 + bg as usize * 2);
-            let char_base = (((bgcnt >> 2) & 3) as u32) * 0x4000;
-            let dest = 0x0600_0000 + char_base + base_block * 32;
-            let size = (width * height * 32).min(0x4000);
-            if dest + size > 0x0601_8000 {
-                continue;
-            }
-            if (0..size).all(|off| self.read8(tile_data + off) == 0) {
-                continue;
-            }
-
-            for off in 0..size {
-                self.write8_raw(dest + off, self.read8(tile_data + off));
-            }
-        }
+    if (S_SCRIPT_STATUS..S_SCRIPT_STATUS + 1).contains(&addr) {
+        return Some("script.status".to_string());
     }
+
+    if (S_SCRIPT_CONTEXT..S_SCRIPT_CONTEXT + 0x64).contains(&addr) {
+        let off = addr - S_SCRIPT_CONTEXT;
+        let name = match off {
+            0x00 => "script.stackDepth",
+            0x01 => "script.mode",
+            0x02 => "script.cmp",
+            0x04..=0x07 => "script.native",
+            0x08..=0x0b => "script.ptr",
+            0x0c..=0x5b => "script.stack",
+            0x5c..=0x5f => "script.cmdTable",
+            0x60..=0x63 => "script.cmdEnd",
+            _ => return None,
+        };
+        return Some(format!("{name}+{off:02x}"));
+    }
+
+    if (S_LOCK_FIELD_CONTROLS..S_LOCK_FIELD_CONTROLS + 1).contains(&addr) {
+        return Some("script.lockFieldControls".to_string());
+    }
+
+    if (G_OBJECT_EVENTS..G_OBJECT_EVENTS + OBJECT_EVENT_SIZE * OBJECT_EVENTS_COUNT).contains(&addr)
+    {
+        let rel = addr - G_OBJECT_EVENTS;
+        let object_id = rel / OBJECT_EVENT_SIZE;
+        let off = rel % OBJECT_EVENT_SIZE;
+        let name = match off {
+            0x00..=0x03 => format!("obj{object_id:02}.flags+{off:x}"),
+            0x10 => format!("obj{object_id:02}.curX.lo"),
+            0x11 => format!("obj{object_id:02}.curX.hi"),
+            0x12 => format!("obj{object_id:02}.curY.lo"),
+            0x13 => format!("obj{object_id:02}.curY.hi"),
+            0x14 => format!("obj{object_id:02}.prevX.lo"),
+            0x15 => format!("obj{object_id:02}.prevX.hi"),
+            0x16 => format!("obj{object_id:02}.prevY.lo"),
+            0x17 => format!("obj{object_id:02}.prevY.hi"),
+            0x18 => format!("obj{object_id:02}.dirs.lo"),
+            0x19 => format!("obj{object_id:02}.range"),
+            0x1c => format!("obj{object_id:02}.action"),
+            0x1e => format!("obj{object_id:02}.metatile.cur"),
+            0x1f => format!("obj{object_id:02}.metatile.prev"),
+            0x20 => format!("obj{object_id:02}.prevMoveDir"),
+            0x22 => format!("obj{object_id:02}.copyMove"),
+            _ => return None,
+        };
+        return Some(name);
+    }
+
+    if (G_PLAYER_AVATAR..G_PLAYER_AVATAR + 0x24).contains(&addr) {
+        let off = addr - G_PLAYER_AVATAR;
+        let name = match off {
+            0x00 => "player.flags",
+            0x01 => "player.transition",
+            0x02 => "player.running",
+            0x03 => "player.tile",
+            0x04 => "player.spriteId",
+            0x05 => "player.objectId",
+            0x06 => "player.preventStep",
+            0x07 => "player.gender",
+            0x08 => "player.bikeState",
+            0x09 => "player.newDir",
+            0x0a => "player.bikeCounter",
+            0x0b => "player.bikeSpeed",
+            _ => return None,
+        };
+        return Some(name.to_string());
+    }
+
+    None
 }
 
 #[derive(Clone, Copy)]

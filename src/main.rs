@@ -44,6 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_else(|| default_save_path(&args.rom));
         Gba::new(rom, Some(save_path), args.trace)
     };
+    if args.trace {
+        gba.set_trace(true);
+    }
     if args.hold_a {
         gba.set_button(Button::A, true);
     }

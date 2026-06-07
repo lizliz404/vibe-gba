@@ -177,10 +177,46 @@ fn obj_affine_set(cpu: &Cpu, bus: &mut Bus) {
     let offset = cpu.reg(3);
     for i in 0..count {
         let s = src + i * 8;
-        let d = dst + i * offset;
+        let d = dst + i * offset * 4;
         for j in 0..4 {
-            bus.write16(d + j * 8, bus.read16(s + j * 2));
+            bus.write16(d + j * offset, bus.read16(s + j * 2));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cartridge::Flash;
+
+    #[test]
+    fn obj_affine_set_uses_destination_offset_bytes() {
+        let mut cpu = Cpu::new(false);
+        let mut bus = Bus::new(vec![0xff], Flash::new(None));
+        let src = 0x0200_0000;
+        let dst = 0x0200_0100;
+
+        for (idx, value) in [0x1111, 0x2222, 0x3333, 0x4444].into_iter().enumerate() {
+            bus.write16(src + idx as u32 * 2, value);
+        }
+        for off in (0..0x20).step_by(2) {
+            bus.write16(dst + off, 0xdead);
+        }
+
+        cpu.set_reg(0, src);
+        cpu.set_reg(1, dst);
+        cpu.set_reg(2, 1);
+        cpu.set_reg(3, 2);
+
+        handle_swi(0x0f, &mut cpu, &mut bus);
+
+        assert_eq!(bus.read16(dst), 0x1111);
+        assert_eq!(bus.read16(dst + 2), 0x2222);
+        assert_eq!(bus.read16(dst + 4), 0x3333);
+        assert_eq!(bus.read16(dst + 6), 0x4444);
+        assert_eq!(bus.read16(dst + 8), 0xdead);
+        assert_eq!(bus.read16(dst + 16), 0xdead);
+        assert_eq!(bus.read16(dst + 24), 0xdead);
     }
 }
 
