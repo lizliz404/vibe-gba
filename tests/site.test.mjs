@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 
 const html = await readFile(new URL('../site/index.html', import.meta.url), 'utf8');
 const css = await readFile(new URL('../site/styles.css', import.meta.url), 'utf8');
+const headers = await readFile(new URL('../site/_headers', import.meta.url), 'utf8');
 
 test('public site states the real project boundary', () => {
   assert.match(html, /vibe-gba/i);
@@ -31,4 +32,10 @@ test('stylesheet exists and includes responsive layout hooks', () => {
   assert.match(css, /\.hero/);
   assert.match(css, /\.card/);
   assert.match(css, /@media/);
+});
+
+test('cloudflare pages headers set safe defaults', () => {
+  assert.match(headers, /X-Content-Type-Options:\s*nosniff/);
+  assert.match(headers, /Referrer-Policy:\s*strict-origin-when-cross-origin/);
+  assert.match(headers, /Cache-Control:\s*public, max-age=604800/);
 });
