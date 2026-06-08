@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "build:wasm": "wasm-pack build --target web --release --out-dir site/play/pkg",
+    "build:wasm": "wasm-pack build --target web --release --out-dir site/play/pkg && rm -f site/play/pkg/.gitignore",
     "check": "cargo fmt --check && cargo test && cargo check --lib --target wasm32-unknown-unknown && npm run build:wasm && node --test tests/site.test.mjs",
     "test:site": "node --test tests/site.test.mjs"
   }
