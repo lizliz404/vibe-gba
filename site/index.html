@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>vibe-gba — Emerald education objective mode</title>
+    <meta
+      name="description"
+      content="vibe-gba is a Rust Game Boy Advance emulator prototype with an Emerald education objective mode. Bring your own legal ROM; this project does not include ROMs."
+    />
+    <meta property="og:title" content="vibe-gba" />
+    <meta
+      property="og:description"
+      content="A scratch-built Rust GBA emulator prototype, now with the first education objective tracker for Emerald onboarding."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/docs/screenshots/littleroot-entry.png" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Rust emulator prototype · education layer first</p>
+        <h1>vibe-gba</h1>
+        <p class="lede">
+          A scratch-built <strong>Game Boy Advance emulator prototype</strong>
+          focused on proving the native Pokémon Emerald onboarding route, then
+          turning that route into a guided puzzle / reflection loop.
+        </p>
+        <div class="actions" aria-label="Primary links">
+          <a class="button primary" href="https://github.com/lizliz404/vibe-gba">GitHub repo</a>
+          <a class="button" href="#tester-loop">Tester loop</a>
+        </div>
+      </section>
+
+      <section class="notice card" aria-labelledby="boundary-title">
+        <h2 id="boundary-title">Boundary, because lawsuits are boring</h2>
+        <p>
+          vibe-gba <strong>does not include ROMs</strong>, save files, BIOS dumps,
+          or emulator state snapshots. To run it locally, you must provide your
+          own <strong>legal ROM</strong>. The live site is currently a public
+          project/testing page, not a browser-playable emulator.
+        </p>
+      </section>
+
+      <section class="grid" aria-label="Project status">
+        <article class="card">
+          <h2>What works now</h2>
+          <ul>
+            <li>Loads user-provided <code>.gba</code> or zipped <code>.gba</code> files locally.</li>
+            <li>Runs deterministic headless frames with scripted input.</li>
+            <li>Captures screenshots, save states, and debug summaries.</li>
+            <li>Reaches Emerald onboarding milestones from native KEYINPUT.</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2>New layer</h2>
+          <p>
+            The first <strong>Emerald education objective mode</strong> parses
+            emulator debug summaries and tracks onboarding objectives:
+          </p>
+          <ol>
+            <li>Wake up in the moving truck.</li>
+            <li>Reach Littleroot Town.</li>
+            <li>Reach Route 101.</li>
+            <li>Rescue Professor Birch.</li>
+            <li>Acquire a starter.</li>
+          </ol>
+        </article>
+      </section>
+
+      <section class="screenshots" aria-label="Milestone screenshots">
+        <figure>
+          <img src="/docs/screenshots/littleroot-entry.png" alt="Pokémon Emerald rendered at the Littleroot entry milestone" />
+          <figcaption>Littleroot entry milestone.</figcaption>
+        </figure>
+        <figure>
+          <img src="/docs/screenshots/littleroot-walk.png" alt="Pokémon Emerald rendered while walking through Littleroot" />
+          <figcaption>Native movement through Littleroot.</figcaption>
+        </figure>
+      </section>
+
+      <section id="tester-loop" class="card tester">
+        <p class="eyebrow">test-driven development starts here</p>
+        <h2>Tester loop</h2>
+        <p>
+          When you test, send feedback in this exact shape so I can turn it into
+          a failing test before touching production code:
+        </p>
+        <ul class="feedback-list">
+          <li><strong>What broke:</strong> the visible bug or wrong behavior.</li>
+          <li><strong>What you expected:</strong> the behavior you think should happen instead.</li>
+          <li><strong>What evidence you captured:</strong> screenshot, command output, browser URL, or reproduction steps.</li>
+        </ul>
+        <pre><code>cargo run -- /path/to/Pokemon\ Emerald.gba --frames 65200 --edu-mode --dump-state</code></pre>
+      </section>
+    </main>
+  </body>
+</html>
