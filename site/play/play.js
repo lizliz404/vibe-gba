@@ -1,3 +1,5 @@
+import init, { WebGba } from './pkg/vibe_gba.js';
+
 const romInput = document.querySelector('#rom-input');
 const romStatus = document.querySelector('#rom-status');
 const screen = document.querySelector('#gba-screen');
@@ -5,6 +7,26 @@ const ctx = screen.getContext('2d');
 
 const STORAGE_KEY = 'vibe-gba:last-rom-meta';
 const pressedButtons = new Set();
+
+let wasmReady = false;
+let gba = null;
+let animationFrame = 0;
+let imageData = ctx.createImageData(screen.width, screen.height);
+let frameCount = 0;
+let lastFpsAt = performance.now();
+
+const BUTTON = Object.freeze({
+  a: 0,
+  b: 1,
+  select: 2,
+  start: 3,
+  right: 4,
+  left: 5,
+  up: 6,
+  down: 7,
+  r: 8,
+  l: 9,
+});
 
 const keyToButton = new Map([
   ['ArrowUp', 'up'],
@@ -34,7 +56,7 @@ function drawBootScreen(message = 'Choose a local ROM to start') {
   ctx.fillText('vibe-gba', 20, 42);
   ctx.fillStyle = '#b8b4d8';
   ctx.fillText(message, 20, 72);
-  ctx.fillText('WASM core: pending', 20, 96);
+  ctx.fillText('browser runtime ready', 20, 96);
 }
 
 function setStatus(message) {
@@ -53,14 +75,62 @@ function rememberRomMeta(file, bytes) {
   );
 }
 
+function syncButtons() {
+  for (const [name, id] of Object.entries(BUTTON)) {
+    gba.set_button(id, pressedButtons.has(name));
+  }
+}
+
+function stopLoop() {
+  if (animationFrame) cancelAnimationFrame(animationFrame);
+  animationFrame = 0;
+}
+
+function renderFrame() {
+  if (!gba) return;
+
+  syncButtons();
+  const rgba = gba.run_frame();
+  imageData.data.set(rgba);
+  ctx.putImageData(imageData, 0, 0);
+
+  frameCount += 1;
+  const now = performance.now();
+  if (now - lastFpsAt >= 1000) {
+    setStatus(`Running locally · ${frameCount} fps-ish · ${Array.from(pressedButtons).join(', ') || 'no input'}`);
+    frameCount = 0;
+    lastFpsAt = now;
+  }
+
+  animationFrame = requestAnimationFrame(renderFrame);
+}
+
+function startEmulator(romBytes, file) {
+  stopLoop();
+  try {
+    gba = new WebGba(romBytes);
+    imageData = ctx.createImageData(gba.width(), gba.height());
+    rememberRomMeta(file, romBytes.length);
+    setStatus(`${file.name} loaded locally (${romBytes.length.toLocaleString()} bytes). Running in browser.`);
+    renderFrame();
+  } catch (error) {
+    gba = null;
+    console.error(error);
+    setStatus(`Could not start emulator: ${error.message || error}`);
+    drawBootScreen('emulator start failed');
+  }
+}
+
 function loadLocalRom(file) {
+  if (!wasmReady) {
+    setStatus('Runtime still loading. Try again in a second.');
+    return;
+  }
+
   const reader = new FileReader();
   reader.addEventListener('load', () => {
-    const buffer = reader.result;
-    const bytes = buffer.byteLength;
-    rememberRomMeta(file, bytes);
-    setStatus(`${file.name} loaded locally (${bytes.toLocaleString()} bytes). Emulator core hookup next.`);
-    drawBootScreen('ROM loaded locally');
+    const bytes = new Uint8Array(reader.result);
+    startEmulator(bytes, file);
   });
   reader.addEventListener('error', () => {
     setStatus('Could not read that ROM file. Try a .gba or zipped .gba file.');
@@ -80,7 +150,6 @@ window.addEventListener('keydown', (event) => {
   if (!button) return;
   event.preventDefault();
   pressedButtons.add(button);
-  setStatus(`Input: ${Array.from(pressedButtons).join(', ')}`);
 });
 
 window.addEventListener('keyup', (event) => {
@@ -100,4 +169,16 @@ if (lastRom) {
   }
 }
 
-drawBootScreen();
+drawBootScreen('loading browser runtime');
+
+init()
+  .then(() => {
+    wasmReady = true;
+    if (!lastRom) setStatus('Browser runtime ready. Choose a local ROM.');
+    drawBootScreen();
+  })
+  .catch((error) => {
+    console.error(error);
+    setStatus(`Could not load browser runtime: ${error.message || error}`);
+    drawBootScreen('runtime load failed');
+  });

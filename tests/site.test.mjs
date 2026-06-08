@@ -61,6 +61,11 @@ test('play page script wires local ROM loading and GBA controls without upload',
   assert.match(playJs, /keyup/);
   assert.match(playJs, /ArrowUp/);
   assert.match(playJs, /KeyZ/);
+  assert.match(playJs, /requestAnimationFrame/);
+  assert.match(playJs, /putImageData/);
+  assert.match(playJs, /\.\/pkg\/vibe_gba\.js/);
+  assert.match(playJs, /new WebGba/);
+  assert.doesNotMatch(playJs, /WASM core: pending/);
   assert.doesNotMatch(playJs, /fetch\s*\(/);
   assert.doesNotMatch(playJs, /XMLHttpRequest/);
 });

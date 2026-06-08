@@ -1,12 +1,18 @@
 use crate::gba::{Button, Gba};
 use crate::{SCREEN_HEIGHT, SCREEN_WIDTH};
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct WebGba {
     gba: Gba,
     rgba_framebuffer: Vec<u8>,
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 impl WebGba {
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen(constructor))]
     pub fn new(rom: Vec<u8>) -> Self {
         Self {
             gba: Gba::new(rom, None, false),
@@ -14,14 +20,24 @@ impl WebGba {
         }
     }
 
-    pub fn set_button(&mut self, button: WebButton, pressed: bool) {
-        self.gba.set_button(button.into(), pressed);
+    pub fn set_button(&mut self, button: u8, pressed: bool) {
+        if let Some(button) = WebButton::from_u8(button) {
+            self.gba.set_button(button.into(), pressed);
+        }
     }
 
-    pub fn run_frame(&mut self) -> &[u8] {
+    pub fn run_frame(&mut self) -> Vec<u8> {
         self.gba.run_frame();
         write_rgba(self.gba.framebuffer(), &mut self.rgba_framebuffer);
-        &self.rgba_framebuffer
+        self.rgba_framebuffer.clone()
+    }
+
+    pub fn width(&self) -> usize {
+        SCREEN_WIDTH
+    }
+
+    pub fn height(&self) -> usize {
+        SCREEN_HEIGHT
     }
 
     pub fn debug_summary(&self) -> String {
@@ -41,6 +57,24 @@ pub enum WebButton {
     Down,
     R,
     L,
+}
+
+impl WebButton {
+    fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::A),
+            1 => Some(Self::B),
+            2 => Some(Self::Select),
+            3 => Some(Self::Start),
+            4 => Some(Self::Right),
+            5 => Some(Self::Left),
+            6 => Some(Self::Up),
+            7 => Some(Self::Down),
+            8 => Some(Self::R),
+            9 => Some(Self::L),
+            _ => None,
+        }
+    }
 }
 
 impl From<WebButton> for Button {
