@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -7,6 +7,18 @@ const css = await readFile(new URL('../site/styles.css', import.meta.url), 'utf8
 const headers = await readFile(new URL('../site/_headers', import.meta.url), 'utf8');
 const playHtml = await readFile(new URL('../site/play/index.html', import.meta.url), 'utf8');
 const playJs = await readFile(new URL('../site/play/play.js', import.meta.url), 'utf8');
+const wasmPkgGitignore = new URL('../site/play/pkg/.gitignore', import.meta.url);
+const wasmRuntimeJs = new URL('../site/play/pkg/vibe_gba.js', import.meta.url);
+const wasmRuntimeBinary = new URL('../site/play/pkg/vibe_gba_bg.wasm', import.meta.url);
+
+async function exists(url) {
+  try {
+    await access(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 test('public site states the real project boundary', () => {
   assert.match(html, /vibe-gba/i);
@@ -68,4 +80,11 @@ test('play page script wires local ROM loading and GBA controls without upload',
   assert.doesNotMatch(playJs, /WASM core: pending/);
   assert.doesNotMatch(playJs, /fetch\s*\(/);
   assert.doesNotMatch(playJs, /XMLHttpRequest/);
+});
+
+
+test('wasm runtime artifacts are present and not hidden by pkg gitignore', async () => {
+  assert.equal(await exists(wasmRuntimeJs), true);
+  assert.equal(await exists(wasmRuntimeBinary), true);
+  assert.equal(await exists(wasmPkgGitignore), false);
 });
