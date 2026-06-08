@@ -1,0 +1,15 @@
+{
+  "name": "vibe-gba",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "vibe_gba_bg.wasm",
+    "vibe_gba.js",
+    "vibe_gba.d.ts"
+  ],
+  "main": "vibe_gba.js",
+  "types": "vibe_gba.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
