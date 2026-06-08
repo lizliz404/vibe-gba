@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Play vibe-gba — local ROM runner</title>
+    <meta
+      name="description"
+      content="A browser-playable entry shell for vibe-gba. Bring your own legal GBA ROM; the ROM stays local in your browser."
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="play-page">
+    <main>
+      <section class="hero play-hero">
+        <p class="eyebrow">browser play shell · local files only</p>
+        <h1>Play vibe-gba</h1>
+        <p class="lede">
+          Bring your own legal <strong>.gba</strong> or zipped <strong>.gba</strong> file.
+          <strong>ROM never leaves your browser.</strong> This page is the web runtime cut;
+          the emulator core will be connected through WebAssembly instead of server upload.
+        </p>
+        <div class="actions" aria-label="Play actions">
+          <label class="button primary" for="rom-input">Choose ROM</label>
+          <input id="rom-input" class="visually-hidden" type="file" accept=".gba,.zip" />
+          <a class="button" href="/">Project page</a>
+        </div>
+        <p id="rom-status" class="status-line" role="status">No ROM loaded yet.</p>
+      </section>
+
+      <section class="play-grid" aria-label="Game runner">
+        <article class="card screen-card">
+          <div class="screen-shell">
+            <canvas id="gba-screen" width="240" height="160" aria-label="Game Boy Advance screen"></canvas>
+          </div>
+          <p class="hint">
+            Keyboard: Arrows = D-pad, Z/A = A, X/S = B, Enter = Start, Backspace = Select, Q/E = L/R.
+          </p>
+        </article>
+
+        <aside class="card objective-card" aria-labelledby="objectives-title">
+          <h2 id="objectives-title">Emerald objectives</h2>
+          <ol class="objective-list">
+            <li data-objective="moving-truck">Wake up in the moving truck.</li>
+            <li data-objective="littleroot">Reach Littleroot Town.</li>
+            <li data-objective="route-101">Reach Route 101.</li>
+            <li data-objective="birch-rescue">Rescue Professor Birch.</li>
+            <li data-objective="starter-acquired">Acquire a starter.</li>
+          </ol>
+        </aside>
+      </section>
+    </main>
+    <script src="/play/play.js" defer></script>
+  </body>
+</html>

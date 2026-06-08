@@ -202,6 +202,63 @@ figcaption {
   padding-left: 1.25rem;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.status-line,
+.hint {
+  margin: 18px 0 0;
+  color: var(--muted);
+}
+
+.play-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.screen-card,
+.objective-card {
+  padding: 24px;
+}
+
+.screen-shell {
+  display: grid;
+  place-items: center;
+  padding: clamp(14px, 3vw, 28px);
+  border: 1px solid rgba(105, 231, 255, 0.22);
+  border-radius: 24px;
+  background: #02030a;
+}
+
+#gba-screen {
+  width: min(100%, 720px);
+  aspect-ratio: 3 / 2;
+  height: auto;
+  image-rendering: pixelated;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 22px 80px rgba(0,0,0,0.45);
+}
+
+.objective-list {
+  display: grid;
+  gap: 12px;
+  padding-left: 1.25rem;
+}
+
+.objective-list li {
+  padding-left: 4px;
+}
+
 @media (max-width: 760px) {
   main {
     width: min(100% - 20px, 1120px);
@@ -217,7 +274,8 @@ figcaption {
   }
 
   .grid,
-  .screenshots {
+  .screenshots,
+  .play-grid {
     grid-template-columns: 1fr;
   }
 

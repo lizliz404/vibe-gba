@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 const html = await readFile(new URL('../site/index.html', import.meta.url), 'utf8');
 const css = await readFile(new URL('../site/styles.css', import.meta.url), 'utf8');
 const headers = await readFile(new URL('../site/_headers', import.meta.url), 'utf8');
+const playHtml = await readFile(new URL('../site/play/index.html', import.meta.url), 'utf8');
+const playJs = await readFile(new URL('../site/play/play.js', import.meta.url), 'utf8');
 
 test('public site states the real project boundary', () => {
   assert.match(html, /vibe-gba/i);
@@ -38,4 +40,27 @@ test('cloudflare pages headers set safe defaults', () => {
   assert.match(headers, /X-Content-Type-Options:\s*nosniff/);
   assert.match(headers, /Referrer-Policy:\s*strict-origin-when-cross-origin/);
   assert.match(headers, /Cache-Control:\s*public, max-age=604800/);
+});
+
+test('play page is a browser-playable emulator entry shell', () => {
+  assert.match(playHtml, /id="rom-input"/);
+  assert.match(playHtml, /accept="\.gba,\.zip"/);
+  assert.match(playHtml, /id="gba-screen"/);
+  assert.match(playHtml, /width="240"/);
+  assert.match(playHtml, /height="160"/);
+  assert.match(playHtml, /ROM never leaves your browser/i);
+  assert.match(playHtml, /data-objective="moving-truck"/);
+  assert.match(playHtml, /data-objective="starter-acquired"/);
+  assert.match(playHtml, /play\/play\.js/);
+});
+
+test('play page script wires local ROM loading and GBA controls without upload', () => {
+  assert.match(playJs, /FileReader/);
+  assert.match(playJs, /localStorage/);
+  assert.match(playJs, /keydown/);
+  assert.match(playJs, /keyup/);
+  assert.match(playJs, /ArrowUp/);
+  assert.match(playJs, /KeyZ/);
+  assert.doesNotMatch(playJs, /fetch\s*\(/);
+  assert.doesNotMatch(playJs, /XMLHttpRequest/);
 });
