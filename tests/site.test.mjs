@@ -54,30 +54,34 @@ test('cloudflare pages headers set safe defaults', () => {
   assert.match(headers, /Cache-Control:\s*public, max-age=604800/);
 });
 
-test('play page is a browser-playable emulator entry shell', () => {
-  assert.match(playHtml, /id="rom-input"/);
-  assert.match(playHtml, /accept="\.gba,\.zip"/);
-  assert.match(playHtml, /id="gba-screen"/);
-  assert.match(playHtml, /width="240"/);
-  assert.match(playHtml, /height="160"/);
-  assert.match(playHtml, /ROM never leaves your browser/i);
-  assert.match(playHtml, /data-objective="moving-truck"/);
-  assert.match(playHtml, /data-objective="starter-acquired"/);
+test('play page is an instant browser game, not a ROM upload shell', () => {
+  assert.match(playHtml, /Emerald Dash/i);
+  assert.match(playHtml, /id="start-button"/);
+  assert.match(playHtml, /id="game-screen"/);
+  assert.match(playHtml, /width="480"/);
+  assert.match(playHtml, /height="320"/);
+  assert.match(playHtml, /No ROM, no upload/i);
+  assert.match(playHtml, /data-objective="truck"/);
+  assert.match(playHtml, /data-objective="birch"/);
   assert.match(playHtml, /play\/play\.js/);
+  assert.doesNotMatch(playHtml, /id="rom-input"/);
+  assert.doesNotMatch(playHtml, /Choose ROM/i);
 });
 
-test('play page script wires local ROM loading and GBA controls without upload', () => {
-  assert.match(playJs, /FileReader/);
-  assert.match(playJs, /localStorage/);
+test('play page script runs a self-contained canvas game without upload or wasm ROM loading', () => {
+  assert.match(playJs, /requestAnimationFrame/);
   assert.match(playJs, /keydown/);
   assert.match(playJs, /keyup/);
   assert.match(playJs, /ArrowUp/);
-  assert.match(playJs, /KeyZ/);
-  assert.match(playJs, /requestAnimationFrame/);
-  assert.match(playJs, /putImageData/);
-  assert.match(playJs, /\.\/pkg\/vibe_gba\.js/);
-  assert.match(playJs, /new WebGba/);
-  assert.doesNotMatch(playJs, /WASM core: pending/);
+  assert.match(playJs, /Space/);
+  assert.match(playJs, /drawWorld/);
+  assert.match(playJs, /spawnObstacle/);
+  assert.match(playJs, /handleCollisions/);
+  assert.match(playJs, /touchControls/);
+  assert.doesNotMatch(playJs, /FileReader/);
+  assert.doesNotMatch(playJs, /localStorage/);
+  assert.doesNotMatch(playJs, /new WebGba/);
+  assert.doesNotMatch(playJs, /\.\/pkg\/vibe_gba\.js/);
   assert.doesNotMatch(playJs, /fetch\s*\(/);
   assert.doesNotMatch(playJs, /XMLHttpRequest/);
 });

@@ -3,50 +3,65 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Play vibe-gba — local ROM runner</title>
+    <title>Play vibe-gba — Emerald Dash</title>
     <meta
       name="description"
-      content="A browser-playable entry shell for vibe-gba. Bring your own legal GBA ROM; the ROM stays local in your browser."
+      content="A browser-playable pixel game inspired by the vibe-gba Emerald onboarding route. No ROM upload, no account, no server round trip — press Start and play."
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="play-page">
     <main>
-      <section class="hero play-hero">
-        <p class="eyebrow">browser play shell · local files only</p>
-        <h1>Play vibe-gba</h1>
+      <section class="hero play-hero playable-hero">
+        <p class="eyebrow">instant browser game · no ROM required</p>
+        <h1>Emerald Dash</h1>
         <p class="lede">
-          Bring your own legal <strong>.gba</strong> or zipped <strong>.gba</strong> file.
-          <strong>ROM never leaves your browser.</strong> The emulator core runs locally
-          through WebAssembly instead of server upload.
+          Dodge the tall grass, collect research notes, and clear the Route 101 onboarding run.
+          This is now a real web game page: click <strong>Start Run</strong>, move, score, fail, retry.
         </p>
         <div class="actions" aria-label="Play actions">
-          <label class="button primary" for="rom-input">Choose ROM</label>
-          <input id="rom-input" class="visually-hidden" type="file" accept=".gba,.zip" />
+          <button id="start-button" class="button primary" type="button">Start Run</button>
+          <button id="pause-button" class="button" type="button">Pause</button>
           <a class="button" href="/">Project page</a>
         </div>
-        <p id="rom-status" class="status-line" role="status">No ROM loaded yet.</p>
+        <p id="game-status" class="status-line" role="status">Ready. No ROM, no upload, no nonsense.</p>
       </section>
 
-      <section class="play-grid" aria-label="Game runner">
-        <article class="card screen-card">
-          <div class="screen-shell">
-            <canvas id="gba-screen" width="240" height="160" aria-label="Game Boy Advance screen"></canvas>
+      <section class="play-grid playable-grid" aria-label="Game runner">
+        <article class="card screen-card game-card">
+          <div class="hud" aria-label="Run stats">
+            <span>Score <strong id="score-value">0</strong></span>
+            <span>Notes <strong id="notes-value">0</strong>/8</span>
+            <span>Lives <strong id="lives-value">3</strong></span>
+            <span>Stage <strong id="stage-value">Truck</strong></span>
+          </div>
+          <div class="screen-shell game-shell">
+            <canvas id="game-screen" width="480" height="320" aria-label="Emerald Dash game screen"></canvas>
+          </div>
+          <div class="control-bar" aria-label="Touch controls">
+            <button class="control-button" type="button" data-control="left" aria-label="Move left">◀</button>
+            <button class="control-button" type="button" data-control="up" aria-label="Move up">▲</button>
+            <button class="control-button" type="button" data-control="down" aria-label="Move down">▼</button>
+            <button class="control-button" type="button" data-control="right" aria-label="Move right">▶</button>
           </div>
           <p class="hint">
-            Keyboard: Arrows = D-pad, Z/A = A, X/S = B, Enter = Start, Backspace = Select, Q/E = L/R.
+            Keyboard: WASD / arrows to move, Space to dash, Enter to start or restart.
           </p>
         </article>
 
         <aside class="card objective-card" aria-labelledby="objectives-title">
-          <h2 id="objectives-title">Emerald objectives</h2>
-          <ol class="objective-list">
-            <li data-objective="moving-truck">Wake up in the moving truck.</li>
-            <li data-objective="littleroot">Reach Littleroot Town.</li>
-            <li data-objective="route-101">Reach Route 101.</li>
-            <li data-objective="birch-rescue">Rescue Professor Birch.</li>
-            <li data-objective="starter-acquired">Acquire a starter.</li>
+          <p class="eyebrow">Route checklist</p>
+          <h2 id="objectives-title">Clear the run</h2>
+          <ol class="objective-list game-objectives">
+            <li data-objective="truck" class="active">Leave the moving truck.</li>
+            <li data-objective="notes">Collect 8 research notes.</li>
+            <li data-objective="grass">Survive the tall grass rush.</li>
+            <li data-objective="birch">Reach Professor Birch.</li>
           </ol>
+          <p class="hint">
+            This replaces the previous ROM-upload emulator shell. If we keep going in this direction,
+            the next work is game feel, art, levels, and retention — not pretending a file picker is a product.
+          </p>
         </aside>
       </section>
     </main>
