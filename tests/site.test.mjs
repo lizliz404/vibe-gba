@@ -54,38 +54,34 @@ test('cloudflare pages headers set safe defaults', () => {
   assert.match(headers, /Cache-Control:\s*public, max-age=604800/);
 });
 
-test('play page is an instant browser game, not a ROM upload shell', () => {
-  assert.match(playHtml, /Emerald Dash/i);
-  assert.match(playHtml, /id="start-button"/);
+test('play page is an in-browser GBA emulator with a ROM file picker, no ROMs included', () => {
+  assert.match(playHtml, /vibe-gba/i);
+  assert.match(playHtml, /id="rom-input"/);
   assert.match(playHtml, /id="game-screen"/);
-  assert.match(playHtml, /width="480"/);
-  assert.match(playHtml, /height="320"/);
-  assert.match(playHtml, /No ROM, no upload/i);
-  assert.match(playHtml, /data-objective="truck"/);
-  assert.match(playHtml, /data-objective="birch"/);
+  assert.match(playHtml, /width="240"/);
+  assert.match(playHtml, /height="160"/);
+  assert.match(playHtml, /bring your own legal ROM/i);
   assert.match(playHtml, /play\/play\.js/);
-  assert.doesNotMatch(playHtml, /id="rom-input"/);
-  assert.doesNotMatch(playHtml, /Choose ROM/i);
+  assert.doesNotMatch(playHtml, /Emerald Dash/);
+  assert.doesNotMatch(playHtml, /id="start-button"/);
 });
 
-test('play page script runs a self-contained canvas game without upload or wasm ROM loading', () => {
+test('play page script wires the WASM emulator: imports the pkg, creates WebGba, renders frames', () => {
+  assert.match(playJs, /pkg\/vibe_gba\.js/);
+  assert.match(playJs, /new WebGba/);
   assert.match(playJs, /requestAnimationFrame/);
+  assert.match(playJs, /putImageData/);
+  assert.match(playJs, /run_frame/);
+  assert.match(playJs, /set_button/);
   assert.match(playJs, /keydown/);
   assert.match(playJs, /keyup/);
   assert.match(playJs, /ArrowUp/);
-  assert.match(playJs, /Space/);
-  assert.match(playJs, /drawWorld/);
-  assert.match(playJs, /spawnObstacle/);
-  assert.match(playJs, /handleCollisions/);
-  assert.match(playJs, /touchControls/);
-  assert.doesNotMatch(playJs, /FileReader/);
+  assert.match(playJs, /romInput/);
+  assert.match(playJs, /arrayBuffer/);
   assert.doesNotMatch(playJs, /localStorage/);
-  assert.doesNotMatch(playJs, /new WebGba/);
-  assert.doesNotMatch(playJs, /\.\/pkg\/vibe_gba\.js/);
   assert.doesNotMatch(playJs, /fetch\s*\(/);
   assert.doesNotMatch(playJs, /XMLHttpRequest/);
 });
-
 
 test('wasm runtime artifacts are present and not hidden by pkg gitignore', async () => {
   assert.equal(await exists(wasmRuntimeJs), true);

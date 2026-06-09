@@ -3,68 +3,67 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Play vibe-gba — Emerald Dash</title>
+    <title>Play vibe-gba — In-browser GBA emulator</title>
     <meta
       name="description"
-      content="A browser-playable pixel game inspired by the vibe-gba Emerald onboarding route. No ROM upload, no account, no server round trip — press Start and play."
+      content="A browser-playable GBA emulator running as WebAssembly. Bring your own legal ROM; this project does not include ROMs."
     />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="play-page">
     <main>
       <section class="hero play-hero playable-hero">
-        <p class="eyebrow">instant browser game · no ROM required</p>
-        <h1>Emerald Dash</h1>
+        <p class="eyebrow">WASM emulator · bring your own legal ROM</p>
+        <h1>vibe-gba</h1>
         <p class="lede">
-          Dodge the tall grass, collect research notes, and clear the Route 101 onboarding run.
-          This is now a real web game page: click <strong>Start Run</strong>, move, score, fail, retry.
+          A scratch-built <strong>Game Boy Advance emulator</strong> running in your browser.
+          Load a <code>.gba</code> or zipped ROM and play with keyboard controls.
+          No ROM is included — this is an emulator, not a ROM distributor.
         </p>
         <div class="actions" aria-label="Play actions">
-          <button id="start-button" class="button primary" type="button">Start Run</button>
-          <button id="pause-button" class="button" type="button">Pause</button>
+          <label class="button primary rom-label" for="rom-input">Choose ROM file…</label>
+          <input id="rom-input" class="rom-file" type="file" accept=".gba,.zip" />
+          <span id="file-name" class="file-name" aria-live="polite"></span>
           <a class="button" href="/">Project page</a>
         </div>
-        <p id="game-status" class="status-line" role="status">Ready. No ROM, no upload, no nonsense.</p>
+        <p id="game-status" class="status-line" role="status">Select a .gba ROM to begin.</p>
       </section>
 
-      <section class="play-grid playable-grid" aria-label="Game runner">
-        <article class="card screen-card game-card">
-          <div class="hud" aria-label="Run stats">
-            <span>Score <strong id="score-value">0</strong></span>
-            <span>Notes <strong id="notes-value">0</strong>/8</span>
-            <span>Lives <strong id="lives-value">3</strong></span>
-            <span>Stage <strong id="stage-value">Truck</strong></span>
-          </div>
-          <div class="screen-shell game-shell">
-            <canvas id="game-screen" width="480" height="320" aria-label="Emerald Dash game screen"></canvas>
-          </div>
-          <div class="control-bar" aria-label="Touch controls">
-            <button class="control-button" type="button" data-control="left" aria-label="Move left">◀</button>
-            <button class="control-button" type="button" data-control="up" aria-label="Move up">▲</button>
-            <button class="control-button" type="button" data-control="down" aria-label="Move down">▼</button>
-            <button class="control-button" type="button" data-control="right" aria-label="Move right">▶</button>
+      <section class="play-grid playable-grid" aria-label="Emulator runner">
+        <article class="card screen-card emulator-card">
+          <div class="screen-shell emulator-shell">
+            <canvas id="game-screen" width="240" height="160" aria-label="GBA emulator screen"></canvas>
           </div>
           <p class="hint">
-            Keyboard: WASD / arrows to move, Space to dash, Enter to start or restart.
+            Keyboard: Arrows / WASD = D-pad, Z = A, X = B, Enter = Start, Backspace = Select, Q / E = L / R, Esc = pause.
           </p>
         </article>
 
-        <aside class="card objective-card" aria-labelledby="objectives-title">
-          <p class="eyebrow">Route checklist</p>
-          <h2 id="objectives-title">Clear the run</h2>
-          <ol class="objective-list game-objectives">
-            <li data-objective="truck" class="active">Leave the moving truck.</li>
-            <li data-objective="notes">Collect 8 research notes.</li>
-            <li data-objective="grass">Survive the tall grass rush.</li>
-            <li data-objective="birch">Reach Professor Birch.</li>
-          </ol>
+        <aside class="card objective-card" aria-labelledby="controls-title">
+          <p class="eyebrow">Key bindings</p>
+          <h2 id="controls-title">Controls</h2>
+          <dl class="control-list">
+            <dt>D-pad</dt><dd>Arrow keys / WASD</dd>
+            <dt>A</dt><dd>Z / A</dd>
+            <dt>B</dt><dd>X / S</dd>
+            <dt>Start</dt><dd>Enter</dd>
+            <dt>Select</dt><dd>Backspace</dd>
+            <dt>L / R</dt><dd>Q / E</dd>
+            <dt>Pause</dt><dd>Esc</dd>
+          </dl>
           <p class="hint">
-            This replaces the previous ROM-upload emulator shell. If we keep going in this direction,
-            the next work is game feel, art, levels, and retention — not pretending a file picker is a product.
+            This emulator is a prototype focused on Pokémon Emerald's native onboarding route.
+            Save files are automatic (browser memory only — download before closing if you want to keep progress).
           </p>
         </aside>
       </section>
     </main>
     <script type="module" src="/play/play.js"></script>
+    <script>
+      document.getElementById('rom-input').addEventListener('change', function () {
+        const name = this.files[0]?.name ?? '';
+        document.getElementById('file-name').textContent = name;
+      });
+    </script>
   </body>
 </html>

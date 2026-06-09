@@ -304,24 +304,60 @@ figcaption {
   transition: color 160ms ease, text-decoration-color 160ms ease;
 }
 
-.game-objectives li.active {
-  color: var(--text);
+.rom-label {
+  cursor: pointer;
 }
 
-.game-objectives li.complete {
-  color: var(--lime);
-  text-decoration: line-through;
-  text-decoration-thickness: 2px;
+.rom-file {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  overflow: hidden;
 }
 
-.objective-list {
+.file-name {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  color: var(--muted);
+  font-size: 0.92rem;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-list {
   display: grid;
-  gap: 12px;
-  padding-left: 1.25rem;
+  grid-template-columns: 80px 1fr;
+  gap: 10px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.objective-list li {
-  padding-left: 4px;
+.control-list dt {
+  color: var(--cyan);
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.control-list dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.emulator-card .screen-shell {
+  padding: 20px;
+}
+
+#game-screen {
+  image-rendering: pixelated;
+  width: 100%;
+  height: auto;
+  background: #000;
 }
 
 @media (max-width: 760px) {
