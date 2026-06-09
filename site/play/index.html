@@ -1,69 +1,41 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Play vibe-gba — In-browser GBA emulator</title>
-    <meta
-      name="description"
-      content="A browser-playable GBA emulator running as WebAssembly. Bring your own legal ROM; this project does not include ROMs."
-    />
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body class="play-page">
-    <main>
-      <section class="hero play-hero playable-hero">
-        <p class="eyebrow">WASM emulator · bring your own legal ROM</p>
-        <h1>vibe-gba</h1>
-        <p class="lede">
-          A scratch-built <strong>Game Boy Advance emulator</strong> running in your browser.
-          Load a <code>.gba</code> or zipped ROM and play with keyboard controls.
-          No ROM is included — this is an emulator, not a ROM distributor.
-        </p>
-        <div class="actions" aria-label="Play actions">
-          <label class="button primary rom-label" for="rom-input">Choose ROM file…</label>
-          <input id="rom-input" class="rom-file" type="file" accept=".gba,.zip" />
-          <span id="file-name" class="file-name" aria-live="polite"></span>
-          <a class="button" href="/">Project page</a>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>vibe-gba — Route 101</title>
+  <meta name="description" content="vibe-gba: a self-contained browser adventure. No ROM, no upload — press Start and play." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="game-body">
+  <div id="game-root">
+    <canvas id="game-screen" width="480" height="360" aria-label="vibe-gba game screen"></canvas>
+    <div id="game-ui">
+      <div id="title-bar">vibe-gba <span class="sub">Route 101</span></div>
+      <div id="start-overlay" class="overlay">
+        <button id="start-btn" class="start-button" type="button">▶ START</button>
+        <p class="start-hint">Arrows/WASD = move &nbsp; Z = interact &nbsp; X = back</p>
+      </div>
+      <div id="dialogue-box" class="hidden">
+        <p id="dialogue-name"></p>
+        <p id="dialogue-text"></p>
+        <p class="dialogue-hint">Press Z to continue</p>
+      </div>
+      <div id="battle-box" class="hidden">
+        <p id="battle-text"></p>
+        <div id="battle-actions">
+          <button data-action="fight" class="battle-btn">FIGHT</button>
+          <button data-action="bag" class="battle-btn">BAG</button>
+          <button data-action="run" class="battle-btn">RUN</button>
         </div>
-        <p id="game-status" class="status-line" role="status">Select a .gba ROM to begin.</p>
-      </section>
-
-      <section class="play-grid playable-grid" aria-label="Emulator runner">
-        <article class="card screen-card emulator-card">
-          <div class="screen-shell emulator-shell">
-            <canvas id="game-screen" width="240" height="160" aria-label="GBA emulator screen"></canvas>
-          </div>
-          <p class="hint">
-            Keyboard: Arrows / WASD = D-pad, Z = A, X = B, Enter = Start, Backspace = Select, Q / E = L / R, Esc = pause.
-          </p>
-        </article>
-
-        <aside class="card objective-card" aria-labelledby="controls-title">
-          <p class="eyebrow">Key bindings</p>
-          <h2 id="controls-title">Controls</h2>
-          <dl class="control-list">
-            <dt>D-pad</dt><dd>Arrow keys / WASD</dd>
-            <dt>A</dt><dd>Z / A</dd>
-            <dt>B</dt><dd>X / S</dd>
-            <dt>Start</dt><dd>Enter</dd>
-            <dt>Select</dt><dd>Backspace</dd>
-            <dt>L / R</dt><dd>Q / E</dd>
-            <dt>Pause</dt><dd>Esc</dd>
-          </dl>
-          <p class="hint">
-            This emulator is a prototype focused on Pokémon Emerald's native onboarding route.
-            Save files are automatic (browser memory only — download before closing if you want to keep progress).
-          </p>
-        </aside>
-      </section>
-    </main>
-    <script type="module" src="/play/play.js"></script>
-    <script>
-      document.getElementById('rom-input').addEventListener('change', function () {
-        const name = this.files[0]?.name ?? '';
-        document.getElementById('file-name').textContent = name;
-      });
-    </script>
-  </body>
+      </div>
+      <div id="hud">
+        <span id="hud-zone"></span>
+        <span id="hud-hp">HP <b id="hp-val">20/20</b></span>
+        <span id="hud-potions">🧪 <b id="potions-val">3</b></span>
+      </div>
+    </div>
+  </div>
+  <script src="/play/play.js"></script>
+</body>
 </html>

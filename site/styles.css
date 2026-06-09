@@ -304,61 +304,185 @@ figcaption {
   transition: color 160ms ease, text-decoration-color 160ms ease;
 }
 
-.rom-label {
-  cursor: pointer;
-}
-
-.rom-file {
-  position: absolute;
-  width: 0;
-  height: 0;
-  opacity: 0;
-  overflow: hidden;
-}
-
-.file-name {
-  display: inline-flex;
+/* ── Game body: full‑screen dark canvas ─────────────────────────── */
+.game-body {
+  display: flex;
   align-items: center;
-  padding: 0 14px;
-  color: var(--muted);
-  font-size: 0.92rem;
-  max-width: 260px;
+  justify-content: center;
+  min-height: 100vh;
+  background: #0a0a14;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.control-list {
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  gap: 10px 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.control-list dt {
-  color: var(--cyan);
-  font-weight: 800;
-  font-size: 0.9rem;
-}
-
-.control-list dd {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.95rem;
-}
-
-.emulator-card .screen-shell {
-  padding: 20px;
+#game-root {
+  position: relative;
+  width: min(520px, 98vw);
 }
 
 #game-screen {
-  image-rendering: pixelated;
+  display: block;
   width: 100%;
   height: auto;
-  background: #000;
+  image-rendering: pixelated;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px #2a2a40, 0 18px 60px rgba(0,0,0,0.6);
+  background: #101018;
 }
+
+#game-ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#game-ui > * { pointer-events: auto; }
+
+/* Title bar */
+#title-bar {
+  position: absolute;
+  top: -32px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: monospace;
+  font-weight: 800;
+  font-size: 1rem;
+  color: #8888aa;
+  letter-spacing: 0.08em;
+}
+#title-bar .sub { color: #555570; font-weight: 400; }
+
+/* HUD */
+#hud {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  justify-content: space-between;
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: #cccce0;
+  text-shadow: 0 1px 0 #000;
+}
+#hud span { background: rgba(0,0,0,0.5); padding: 2px 8px; border-radius: 3px; }
+#hud b { color: #f8f0e0; }
+
+/* START overlay */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5,5,16,0.78);
+  border-radius: 6px;
+}
+.overlay.hidden { display: none; }
+
+.start-button {
+  padding: 18px 52px;
+  border: 3px solid #e04848;
+  border-radius: 8px;
+  color: #f8f0e0;
+  font-family: monospace;
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  background: linear-gradient(135deg, #c03030, #a02020);
+  cursor: pointer;
+  transition: transform 80ms ease;
+}
+.start-button:hover { transform: scale(1.04); }
+.start-button:active { transform: scale(0.96); background: #801818; }
+
+.start-hint {
+  margin-top: 18px;
+  color: #8888aa;
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+/* Dialogue box */
+#dialogue-box {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 14px 18px;
+  border: 2px solid #606080;
+  border-radius: 6px;
+  background: rgba(10,10,24,0.94);
+  color: #f8f0e0;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+#dialogue-box.hidden { display: none; }
+#dialogue-name {
+  margin: 0 0 6px;
+  font-weight: 800;
+  color: #e04848;
+}
+#dialogue-text { margin: 0; line-height: 1.45; }
+.dialogue-hint {
+  margin: 10px 0 0;
+  color: #606080;
+  font-size: 0.7rem;
+  text-align: right;
+}
+
+/* Battle box */
+#battle-box {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 14px 18px;
+  border: 2px solid #8040a0;
+  border-radius: 6px;
+  background: rgba(16,8,28,0.96);
+  color: #f8f0e0;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+#battle-box.hidden { display: none; }
+#battle-text { margin: 0 0 12px; line-height: 1.5; }
+.enemy-name { color: #c080e0; font-weight: 800; }
+.hp-bar {
+  display: inline-block;
+  width: 80px;
+  height: 8px;
+  border: 1px solid #606080;
+  border-radius: 4px;
+  background: #181828;
+  vertical-align: middle;
+  margin: 0 4px;
+  overflow: hidden;
+}
+.hp-bar span {
+  display: block;
+  height: 100%;
+  background: #48d860;
+  border-radius: 3px;
+  transition: width 200ms ease;
+}
+#battle-actions { display: flex; gap: 8px; }
+.battle-btn {
+  flex: 1;
+  padding: 8px 0;
+  border: 2px solid #606080;
+  border-radius: 4px;
+  color: #f8f0e0;
+  font-family: monospace;
+  font-size: 0.8rem;
+  font-weight: 800;
+  background: #202038;
+  cursor: pointer;
+  text-align: center;
+}
+.battle-btn:hover { background: #303058; border-color: #8888aa; }
+.battle-btn:active { background: #404078; }
 
 @media (max-width: 760px) {
   main {
